@@ -1,0 +1,7 @@
+CREATE TABLE admins (
+  id SERIAL PRIMARY KEY,
+  nom VARCHAR(100) NOT NULL,
+  email VARCHAR(150) NOT NULL UNIQUE,
+  mot_de_passe TEXT NOT NULL,
+  date_creation TIMESTAMP DEFAULT now()
+);
