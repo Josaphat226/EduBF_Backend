@@ -193,6 +193,12 @@ app.post('/api/tracker', async (req, res) => {
 
 // ========== ERREURS ==========
 
+// Route légère utilisée uniquement pour garder le serveur éveillé (voir UptimeRobot/cron-job.org)
+app.get('/health', (req, res) => {
+  res.status(200).send('OK')
+})
+
+
 app.use((req, res) => {
   res.status(404).json({ error: 'Route introuvable.' })
 })
