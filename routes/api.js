@@ -435,9 +435,10 @@ router.post('/contact', async (req, res, next) => {
     const { nom, email, sujet, message } = req.body
     if (!nom || !email || !message) return fail(res, 400, 'Tous les champs obligatoires doivent être remplis.')
 
-    await resend.emails.send({
-      from: 'EduBF <onboarding@resend.dev>',
-      to: 'jsawadogo367@gmail.com',
+   await resend.emails.send({
+      from: 'EduBF <noreply@edubf.net>',
+      to: 'contact@edubf.net',
+      reply_to: email,
       subject: `[Contact EduBF] ${sujet || 'Nouveau message'}`,
       html: `
         <div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:2rem;">
