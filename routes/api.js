@@ -197,9 +197,8 @@ router.post('/auth/forgot-password', async (req, res, next) => {
     const lien = `${process.env.FRONTEND_URLS.split(',')[0]}/reinitialiser-mot-de-passe/${token}`
    await resend.emails.send({
       from: 'EduBF <noreply@edubf.net>',
-      to: 'contact@edubf.net',
-      reply_to: email,
-      subject: `[Contact EduBF] ${sujet || 'Nouveau message'}`,
+      to: user.email,
+      subject: 'Réinitialisation de ton mot de passe — EduBF',
       html: `
         <div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:2rem;">
           <div style="text-align:center;margin-bottom:1.5rem;">
