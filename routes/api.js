@@ -7,6 +7,8 @@
 // Monté dans server.js via : app.use('/api', require('./routes/api'))
 // ==========================================================================
 
+
+
 const express = require('express')
 const router = express.Router()
 const bcrypt = require('bcrypt')
@@ -16,6 +18,7 @@ const reco = require('../database/recommandation')
 const { Resend } = require('resend')
 const supabase = require('../database/supabase')
 const resend = new Resend(process.env.RESEND_API_KEY)
+const { envoyerEmailBienvenue } = require('../services/email')
 
 // Petit helper pour uniformiser les erreurs JSON
 function fail(res, status, message) {
@@ -79,13 +82,17 @@ router.post('/auth/register', async (req, res, next) => {
       [nom_complet.trim(), email.toLowerCase().trim(), hash, filiere || null, classe || null]
     )
 
-    req.session.user = {
+  req.session.user = {
       id: rows[0].id,
       nom_complet: rows[0].nom_complet,
       email: rows[0].email,
       classe: rows[0].classe,
       filiere: rows[0].filiere,
     }
+
+    // Pas de "await" volontairement : on ne fait pas attendre l'utilisateur
+    // pour l'envoi de l'email, l'inscription répond tout de suite.
+    envoyerEmailBienvenue(rows[0].email, rows[0].nom_complet)
 
     res.status(201).json({ user: req.session.user })
   } catch (err) { next(err) }

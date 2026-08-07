@@ -19,6 +19,8 @@ const reco = require('./database/recommandation')
 const app = express()
 const PORT = process.env.PORT || 3000
 
+const { envoyerEmailBienvenue } = require('./services/email')
+
 // ========== SÉCURITÉ ==========
 
 app.set('trust proxy', 1)
@@ -110,12 +112,13 @@ passport.use(new GoogleStrategy({
     const { rows } = await db.query('SELECT * FROM users WHERE email = $1', [email])
     let user = rows[0]
 
-    if (!user) {
+ if (!user) {
       const { rows: newRows } = await db.query(
         'INSERT INTO users (nom_complet, email, mot_de_passe, email_verifie) VALUES ($1, $2, $3, 1) RETURNING *',
         [nom_complet, email, 'GOOGLE_AUTH_NO_PASSWORD']
       )
       user = newRows[0]
+      envoyerEmailBienvenue(user.email, user.nom_complet)
     }
 
     if (user.statut === 'suspendu') {
