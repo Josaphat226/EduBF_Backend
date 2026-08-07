@@ -456,6 +456,27 @@ router.post('/contact', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+
+// ===================== NEWSLETTER =====================
+
+router.post('/newsletter/abonner', async (req, res, next) => {
+  try {
+    const { email } = req.body
+    const emailValide = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '')
+    if (!emailValide) return fail(res, 400, 'Adresse email invalide.')
+
+    // ON CONFLICT DO NOTHING : si l'email est déjà abonné, on ne renvoie
+    // pas d'erreur — on répond simplement comme si ça avait marché, pour
+    // ne pas révéler à quelqu'un si une adresse est déjà dans la liste.
+    await db.query(
+      'INSERT INTO newsletter_abonnes (email) VALUES ($1) ON CONFLICT (email) DO NOTHING',
+      [email]
+    )
+
+    res.json({ success: true, message: 'Merci, tu es bien abonné(e) !' })
+  } catch (err) { next(err) }
+})
+
 // ===================== TRACKER =====================
 
 router.post('/tracker', async (req, res) => {
