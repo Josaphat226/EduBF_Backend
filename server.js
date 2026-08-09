@@ -149,20 +149,25 @@ app.use('/api', (err, req, res, next) => {
 
 const FRONTEND_URL = allowedOrigins[0]
 
-app.get('/auth/google',
-  passport.authenticate('google', { scope: ['profile', 'email'] })
-)
+app.get('/auth/google', (req, res, next) => {
+  const cible = typeof req.query.next === 'string' && req.query.next.startsWith('/') ? req.query.next : '/'
+  passport.authenticate('google', { scope: ['profile', 'email'], state: cible })(req, res, next)
+})
 
 app.get('/auth/google/callback',
-  passport.authenticate('google', { failureRedirect: `${FRONTEND_URL}/connexion` }),
+  passport.authenticate('google', { failureRedirect: allowedOrigins[0] + '/connexion?erreur=google' }),
   (req, res) => {
     req.session.user = {
       id: req.user.id,
       nom_complet: req.user.nom_complet,
       email: req.user.email
     }
+    // "state" transporte le "next" à travers toute la redirection vers
+    // Google et retour — on l'utilise pour revenir exactement là où
+    // l'utilisateur était avant de cliquer sur "Continuer avec Google".
+    const cible = typeof req.query.state === 'string' && req.query.state.startsWith('/') ? req.query.state : '/'
     req.session.save(() => {
-      res.redirect(FRONTEND_URL)
+      res.redirect(allowedOrigins[0] + cible)
     })
   }
 )
