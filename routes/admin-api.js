@@ -20,6 +20,27 @@ function requireAdmin(req, res, next) {
   next()
 }
 
+
+async function getSignedUrlAdmin(fichierUrl, expiresIn = 300) {
+  let filename = fichierUrl
+
+  if (fichierUrl.startsWith('http')) {
+    const marker = '/documents/'
+    const idx = fichierUrl.indexOf(marker)
+    if (idx === -1) throw new Error('URL de fichier invalide.')
+    filename = fichierUrl.substring(idx + marker.length)
+  }
+
+  const { data, error } = await supabase.storage
+    .from('documents')
+    .createSignedUrl(filename, expiresIn)
+
+  if (error) throw new Error('Impossible de générer le lien : ' + error.message)
+  return data.signedUrl
+}
+
+
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 },
@@ -212,6 +233,17 @@ router.delete('/documents/:id', requireAdmin, async (req, res, next) => {
     await logAction(req, 'suppression', 'document', req.params.id, `Suppression du document "${rows[0]?.titre}"`)
 
     res.json({ success: true })
+  } catch (err) { next(err) }
+})
+
+
+router.get('/documents/:id/apercu', requireAdmin, async (req, res, next) => {
+  try {
+    const { rows } = await db.query('SELECT * FROM documents WHERE id = $1', [req.params.id])
+    if (!rows[0]) return fail(res, 404, 'Document introuvable.')
+
+    const url = await getSignedUrlAdmin(rows[0].fichier_url)
+    res.json({ url, titre: rows[0].titre })
   } catch (err) { next(err) }
 })
 
