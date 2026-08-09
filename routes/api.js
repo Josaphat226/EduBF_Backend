@@ -30,10 +30,17 @@ function fail(res, status, message) {
 // Génère une URL signée temporaire à partir de l'URL publique stockée en base.
 // Remplace l'ancien renvoi direct de l'URL publique (faille corrigée).
 async function getSignedUrl(fichierUrl, { download = false, expiresIn = 300 } = {}) {
-  const marker = '/documents/'
-  const idx = fichierUrl.indexOf(marker)
-  if (idx === -1) throw new Error('URL de fichier invalide.')
-  const filename = fichierUrl.substring(idx + marker.length)
+  let filename = fichierUrl
+
+  // Si c'est une URL complète (documents uploadés via l'admin), on en extrait
+  // juste le chemin du fichier. Si c'est déjà un chemin brut (documents
+  // importés en masse via le script CSV), on l'utilise tel quel.
+  if (fichierUrl.startsWith('http')) {
+    const marker = '/documents/'
+    const idx = fichierUrl.indexOf(marker)
+    if (idx === -1) throw new Error('URL de fichier invalide.')
+    filename = fichierUrl.substring(idx + marker.length)
+  }
 
   const options = download ? { download: true } : {}
   const { data, error } = await supabase.storage
