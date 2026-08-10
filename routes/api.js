@@ -17,6 +17,7 @@ const db = require('../database/database')
 const reco = require('../database/recommandation')
 const { Resend } = require('resend')
 const supabase = require('../database/supabase')
+const { PDFDocument, rgb, degrees, StandardFonts } = require('pdf-lib')
 const resend = new Resend(process.env.RESEND_API_KEY)
 const { envoyerEmailBienvenue } = require('../services/email')
 
@@ -26,22 +27,21 @@ function fail(res, status, message) {
 }
 
 
+// Extrait le chemin du fichier dans le bucket, que fichierUrl soit une URL
+// complète (documents uploadés via l'admin) ou déjà un chemin brut
+// (documents importés en masse via le script CSV).
+function extraireCheminFichier(fichierUrl) {
+  if (!fichierUrl.startsWith('http')) return fichierUrl
+  const marker = '/documents/'
+  const idx = fichierUrl.indexOf(marker)
+  if (idx === -1) throw new Error('URL de fichier invalide.')
+  return fichierUrl.substring(idx + marker.length)
+}
 
 // Génère une URL signée temporaire à partir de l'URL publique stockée en base.
 // Remplace l'ancien renvoi direct de l'URL publique (faille corrigée).
 async function getSignedUrl(fichierUrl, { download = false, expiresIn = 300 } = {}) {
-  let filename = fichierUrl
-
-  // Si c'est une URL complète (documents uploadés via l'admin), on en extrait
-  // juste le chemin du fichier. Si c'est déjà un chemin brut (documents
-  // importés en masse via le script CSV), on l'utilise tel quel.
-  if (fichierUrl.startsWith('http')) {
-    const marker = '/documents/'
-    const idx = fichierUrl.indexOf(marker)
-    if (idx === -1) throw new Error('URL de fichier invalide.')
-    filename = fichierUrl.substring(idx + marker.length)
-  }
-
+  const filename = extraireCheminFichier(fichierUrl)
   const options = download ? { download: true } : {}
   const { data, error } = await supabase.storage
     .from('documents')
@@ -49,6 +49,44 @@ async function getSignedUrl(fichierUrl, { download = false, expiresIn = 300 } = 
 
   if (error) throw new Error('Impossible de générer le lien : ' + error.message)
   return data.signedUrl
+}
+
+// Ajoute un filigrane diagonal et semi-transparent ("EduBF · edubf.net") sur
+// chaque page d'un PDF, pour dissuader la redistribution des documents
+// téléchargés.
+async function filigranerPdf(pdfBytes) {
+  const pdfDoc = await PDFDocument.load(pdfBytes)
+  const police = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+  const texte = 'EduBF · edubf.net'
+  const taille = 42
+
+  for (const page of pdfDoc.getPages()) {
+    const { width, height } = page.getSize()
+    const largeurTexte = police.widthOfTextAtSize(texte, taille)
+
+    // Répète le filigrane à plusieurs endroits de la page (pas juste au
+    // centre), pour qu'il reste visible même si une partie du document est
+    // recadrée ou capturée en photo.
+    const positions = [
+      { x: width / 2 - largeurTexte / 2, y: height * 0.75 },
+      { x: width / 2 - largeurTexte / 2, y: height / 2 },
+      { x: width / 2 - largeurTexte / 2, y: height * 0.25 },
+    ]
+
+    for (const pos of positions) {
+      page.drawText(texte, {
+        x: pos.x,
+        y: pos.y,
+        size: taille,
+        font: police,
+        color: rgb(0.5, 0.5, 0.5),
+        opacity: 0.32,
+        rotate: degrees(45),
+      })
+    }
+  }
+
+  return pdfDoc.save()
 }
 
 
@@ -375,8 +413,19 @@ router.get('/documents/:id/telecharger', requireAuth, async (req, res, next) => 
     await db.query('UPDATE documents SET nb_telechargements = nb_telechargements + 1 WHERE id = $1', [document.id])
     reco.enregistrerAction(req.session.user.id, document.id, 'telechargement').catch(() => {})
 
-    const url = await getSignedUrl(document.fichier_url, { download: true })
-    res.json({ url })
+    // Récupère le fichier original depuis Supabase, ajoute le filigrane, puis
+    // renvoie directement le PDF modifié — le téléchargement ne dépend plus
+    // d'une URL exposée au navigateur.
+    const filename = extraireCheminFichier(document.fichier_url)
+    const { data, error } = await supabase.storage.from('documents').download(filename)
+    if (error) throw new Error('Impossible de récupérer le fichier : ' + error.message)
+
+    const pdfBytesOriginal = Buffer.from(await data.arrayBuffer())
+    const pdfBytesFiligrane = await filigranerPdf(pdfBytesOriginal)
+
+    res.set('Content-Type', 'application/pdf')
+    res.set('Content-Disposition', `attachment; filename="${document.titre.replace(/[^a-z0-9]/gi, '_')}.pdf"`)
+    res.send(Buffer.from(pdfBytesFiligrane))
   } catch (err) { next(err) }
 })
 
