@@ -15,6 +15,7 @@ async function listerOperateurs(pays) {
   const url = pays ? `${SEBPAY_API}/operators?country=${pays}` : `${SEBPAY_API}/operators`
   try {
     const { data } = await axios.get(url, { headers: headers() })
+    console.log('Réponse brute GET /operators:', JSON.stringify(data.data, null, 2))
     return data.data
   } catch (err) {
     console.error('Détail erreur SebPay:', JSON.stringify(err.response?.data))
