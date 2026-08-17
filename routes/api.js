@@ -579,6 +579,7 @@ router.get('/abonnement/operateurs', requireAuth, async (req, res, next) => {
 router.post('/abonnement/payer', requireAuth, async (req, res, next) => {
   try {
     const { plan, telephone, operateur, otp_code } = req.body
+    console.log('Opérateur reçu du frontend:', JSON.stringify(operateur))
     const details = PLANS[plan]
     if (!details) return fail(res, 400, 'Plan invalide.')
     if (!telephone || !operateur) return fail(res, 400, 'Numéro de téléphone et opérateur requis.')
@@ -598,7 +599,7 @@ router.post('/abonnement/payer', requireAuth, async (req, res, next) => {
       otpCode: otp_code,
     })
 
-    res.json({ id: collecte.id, statut: collecte.status, reference })
+        res.json({ id: collecte.transaction_id, statut: collecte.status, reference })
   } catch (err) {
     const message = err.response?.data?.message || err.message
     fail(res, 400, message)
@@ -620,7 +621,7 @@ router.post('/abonnement/webhook', async (req, res, next) => {
     // On ne fait jamais confiance au seul contenu du webhook : on revérifie
     // le statut réel directement auprès de SebPay avant d'activer quoi que
     // ce soit.
-    const collecte = await sebpay.verifierCollecte(data.id)
+        const collecte = await sebpay.verifierCollecte(data.transaction_id)
     if (collecte.status !== 'approved') {
       return res.json({ ok: true })
     }
