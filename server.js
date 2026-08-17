@@ -2,6 +2,7 @@ require('dotenv').config()
 console.log('DATABASE_URL chargée :', !!process.env.DATABASE_URL)
 console.log('PORT :', process.env.PORT)
 
+
 const express = require('express')
 const cors = require('cors')
 const session = require('express-session')
@@ -71,7 +72,16 @@ const limiterConnexion = rateLimit({
 // ========== CONFIGURATION ==========
 
 app.use(express.urlencoded({ extended: true }))
-app.use(express.json())
+app.use(express.json({
+  // Conserve les octets bruts de chaque requête JSON, nécessaires pour
+  // vérifier la signature HMAC des webhooks (SebPay signe le corps brut,
+  // pas le JSON reparsé — les deux peuvent différer légèrement en
+  // formatage, ce qui ferait échouer la vérification si on ne gardait
+  // que la version reparsée).
+  verify: (req, res, buf) => {
+    req.rawBody = buf
+  },
+}))
 
 
 const isProd = process.env.NODE_ENV === 'production'

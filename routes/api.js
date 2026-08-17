@@ -20,6 +20,7 @@ const supabase = require('../database/supabase')
 const { PDFDocument, rgb, degrees, StandardFonts } = require('pdf-lib')
 const resend = new Resend(process.env.RESEND_API_KEY)
 const { envoyerEmailBienvenue } = require('../services/email')
+const sebpay = require('../services/sebpay')
 
 // Petit helper pour uniformiser les erreurs JSON
 function fail(res, status, message) {
@@ -555,3 +556,111 @@ router.post('/tracker', async (req, res) => {
 })
 
 module.exports = router
+
+
+// ===================== ABONNEMENT PREMIUM (SebPay) =====================
+
+const PAYS = 'BF'
+const PLANS = {
+  mensuel: { montant: 500, jours: 30 },
+  annuel: { montant: 5000, jours: 365 },
+}
+
+// Liste les opérateurs disponibles pour le Burkina Faso, avec l'information
+// de savoir si chacun exige un code OTP avant de pouvoir payer.
+router.get('/abonnement/operateurs', requireAuth, async (req, res, next) => {
+  try {
+    const operateurs = await sebpay.listerOperateurs(PAYS)
+    res.json({ operateurs })
+  } catch (err) { next(err) }
+})
+
+// Initie un paiement d'abonnement.
+router.post('/abonnement/payer', requireAuth, async (req, res, next) => {
+  try {
+    const { plan, telephone, operateur, otp_code } = req.body
+    const details = PLANS[plan]
+    if (!details) return fail(res, 400, 'Plan invalide.')
+    if (!telephone || !operateur) return fail(res, 400, 'Numéro de téléphone et opérateur requis.')
+
+    // Le plan est encodé dans la référence, pour pouvoir le relire au
+    // moment du webhook sans avoir besoin d'une table de correspondance.
+    const reference = `EDUBF-${req.session.user.id}-${plan}-${Date.now()}`
+
+    const collecte = await sebpay.creerCollecte({
+      montant: details.montant,
+      devise: 'XOF',
+      telephone,
+      operateur,
+      pays: PAYS,
+      reference,
+      callbackUrl: `${process.env.APP_URL}/api/abonnement/webhook`,
+      otpCode: otp_code,
+    })
+
+    res.json({ id: collecte.id, statut: collecte.status, reference })
+  } catch (err) {
+    const message = err.response?.data?.message || err.message
+    fail(res, 400, message)
+  }
+})
+
+// Webhook SebPay — confirme un paiement.
+router.post('/abonnement/webhook', async (req, res, next) => {
+  try {
+    const signature = req.headers['x-sebpay-signature']
+    const valide = sebpay.verifierSignatureWebhook(req.rawBody, signature)
+    if (!valide) return res.status(401).json({ error: 'Signature invalide.' })
+
+    const { data } = req.body
+    if (!data || data.status !== 'approved') {
+      return res.json({ ok: true }) // On accuse réception, sans rien activer.
+    }
+
+    // On ne fait jamais confiance au seul contenu du webhook : on revérifie
+    // le statut réel directement auprès de SebPay avant d'activer quoi que
+    // ce soit.
+    const collecte = await sebpay.verifierCollecte(data.id)
+    if (collecte.status !== 'approved') {
+      return res.json({ ok: true })
+    }
+
+    // La référence a la forme EDUBF-{userId}-{plan}-{timestamp}
+    const [, userId, plan] = collecte.external_reference.split('-')
+    const details = PLANS[plan]
+    if (!details) return res.json({ ok: true })
+
+    const dateDebut = new Date()
+    const dateFin = new Date(dateDebut.getTime() + details.jours * 24 * 60 * 60 * 1000)
+
+    await db.query(
+      `INSERT INTO abonnements (user_id, statut, date_debut, date_fin, reference_paiement)
+       VALUES ($1, 'actif', $2, $3, $4)`,
+      [userId, dateDebut, dateFin, collecte.external_reference]
+    )
+
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('Erreur webhook SebPay:', err.message)
+    res.status(500).json({ error: 'Erreur interne.' })
+  }
+})
+
+// Statut de l'abonnement de l'utilisateur connecté.
+router.get('/abonnement/statut', requireAuth, async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT * FROM abonnements
+       WHERE user_id = $1 AND statut = 'actif' AND date_fin > NOW()
+       ORDER BY date_fin DESC LIMIT 1`,
+      [req.session.user.id]
+    )
+    const abonnement = rows[0]
+    if (!abonnement) return res.json({ actif: false, plan: null, date_fin: null })
+
+    const dureeJours = (new Date(abonnement.date_fin) - new Date(abonnement.date_debut)) / (1000 * 60 * 60 * 24)
+    const plan = dureeJours > 200 ? 'annuel' : 'mensuel'
+
+    res.json({ actif: true, plan, date_fin: abonnement.date_fin })
+  } catch (err) { next(err) }
+})
