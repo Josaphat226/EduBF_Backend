@@ -1,0 +1,1 @@
+ALTER TABLE examens ADD CONSTRAINT examens_systeme_nom_unique UNIQUE (systeme_educatif_id, nom);

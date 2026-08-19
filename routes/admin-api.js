@@ -150,6 +150,84 @@ router.get('/documents', requireAdmin, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+
+
+// ==========================================================================
+// REFERENTIELS V2 — alimentent les listes deroulantes du formulaire document
+// ==========================================================================
+
+router.get('/referentiels/categories', requireAdmin, async (req, res, next) => {
+  try {
+    const { rows } = await db.query('SELECT id, nom, slug, icone FROM categories ORDER BY ordre')
+    res.json({ categories: rows })
+  } catch (err) { next(err) }
+})
+
+router.get('/referentiels/examens', requireAdmin, async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      `SELECT e.id, e.nom, e.type_formation
+       FROM examens e
+       ORDER BY e.ordre, e.nom`
+    )
+    res.json({ examens: rows })
+  } catch (err) { next(err) }
+})
+
+router.get('/referentiels/series', requireAdmin, async (req, res, next) => {
+  try {
+    const { examen_id } = req.query
+    if (!examen_id) return res.json({ series: [] })
+    const { rows } = await db.query(
+      'SELECT id, nom, type, groupe FROM series_filieres WHERE examen_id = $1 ORDER BY groupe, ordre, nom',
+      [examen_id]
+    )
+    res.json({ series: rows })
+  } catch (err) { next(err) }
+})
+
+
+router.get('/referentiels/matieres', requireAdmin, async (req, res, next) => {
+  try {
+    const { rows } = await db.query('SELECT id, nom FROM matieres ORDER BY nom')
+    res.json({ matieres: rows })
+  } catch (err) { next(err) }
+})
+
+router.post('/referentiels/matieres', requireAdmin, async (req, res, next) => {
+  try {
+    const { nom, domaine_id } = req.body
+    if (!nom || !nom.trim()) return fail(res, 400, 'Le nom de la matière est obligatoire.')
+
+    const nomPropre = nom.trim()
+    const domaineIdOuNull = domaine_id || null
+
+    const { rows: existantes } = await db.query(
+      `SELECT id, nom FROM matieres
+       WHERE LOWER(nom) = LOWER($1)
+       AND (domaine_id = $2 OR (domaine_id IS NULL AND $2 IS NULL))`,
+      [nomPropre, domaineIdOuNull]
+    )
+    if (existantes[0]) return res.json({ matiere: existantes[0], creee: false })
+
+    const { rows } = await db.query(
+      'INSERT INTO matieres (nom, domaine_id) VALUES ($1, $2) RETURNING id, nom',
+      [nomPropre, domaineIdOuNull]
+    )
+    res.status(201).json({ matiere: rows[0], creee: true })
+  } catch (err) { next(err) }
+})
+
+router.get('/referentiels/types-document', requireAdmin, async (req, res, next) => {
+  try {
+    const { categorie_id } = req.query
+    const { rows } = categorie_id
+      ? await db.query('SELECT id, nom FROM types_document WHERE categorie_id = $1 ORDER BY nom', [categorie_id])
+      : await db.query('SELECT id, nom, categorie_id FROM types_document ORDER BY nom')
+    res.json({ types: rows })
+  } catch (err) { next(err) }
+})
+
 router.get('/documents/:id', requireAdmin, async (req, res, next) => {
   try {
     const { rows } = await db.query('SELECT * FROM documents WHERE id = $1', [req.params.id])
@@ -160,49 +238,95 @@ router.get('/documents/:id', requireAdmin, async (req, res, next) => {
 
 router.post('/documents', requireAdmin, upload.single('fichier'), async (req, res, next) => {
   try {
-    const { titre, description, niveau, cycle, serie_filiere, matiere, type_document, annee_scolaire, statut } = req.body
+    const {
+      titre, description, niveau, annee_scolaire, statut,
+      categorie_id, type_precis_id, examen_id,
+      matiere_ids, serie_ids,
+    } = req.body
+
     if (!req.file) return fail(res, 400, 'Veuillez sélectionner un fichier PDF.')
     if (!titre) return fail(res, 400, 'Le titre est obligatoire.')
+    if (!categorie_id) return fail(res, 400, 'La catégorie est obligatoire.')
 
     const fichier_url = await uploadPDF(req.file)
     const statutFinal = statut || 'en_attente'
 
+    // matiere_ids/serie_ids arrivent en JSON (chaine) depuis le FormData,
+    // ex: "[1,3,5]" -> on les reconvertit en tableau
+    const matiereIds = matiere_ids ? JSON.parse(matiere_ids) : []
+    const serieIds = serie_ids ? JSON.parse(serie_ids) : []
+
     const { rows } = await db.query(
       `INSERT INTO documents
-        (titre, description, fichier_url, niveau, cycle, serie_filiere, matiere, type_document, annee_scolaire, admin_id, statut, actif)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [titre.trim(), description, fichier_url, niveau, cycle, serie_filiere || null,
-        matiere, type_document, annee_scolaire || null, req.session.admin.id,
-        statutFinal, statutFinal === 'publie' ? 1 : 0]
+        (titre, description, fichier_url, niveau, annee_scolaire, admin_id, statut, actif,
+         categorie_id, type_precis_id, examen_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [titre.trim(), description, fichier_url, niveau || null, annee_scolaire || null,
+        req.session.admin.id, statutFinal, statutFinal === 'publie' ? 1 : 0,
+        categorie_id, type_precis_id || null, examen_id || null]
     )
+    const docId = rows[0].id
 
-    await logAction(req, 'creation', 'document', rows[0].id, `Création du document "${titre.trim()}" — statut: ${statutFinal}`)
+    for (const matiereId of matiereIds) {
+      await db.query(
+        'INSERT INTO document_matieres (document_id, matiere_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [docId, matiereId]
+      )
+    }
+    for (const serieId of serieIds) {
+      await db.query(
+        'INSERT INTO document_series (document_id, serie_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [docId, serieId]
+      )
+    }
+
+    await logAction(req, 'creation', 'document', docId, `Création du document "${titre.trim()}" — statut: ${statutFinal}`)
     res.status(201).json({ document: rows[0] })
   } catch (err) { next(err) }
 })
 
 router.put('/documents/:id', requireAdmin, upload.single('fichier'), async (req, res, next) => {
   try {
-    const { titre, description, niveau, cycle, serie_filiere, matiere, type_document, annee_scolaire, statut } = req.body
+    const {
+      titre, description, niveau, annee_scolaire, statut,
+      categorie_id, type_precis_id, examen_id,
+      matiere_ids, serie_ids,
+    } = req.body
     const id = req.params.id
     const statutFinal = statut || 'publie'
     const actif = statutFinal === 'publie' ? 1 : 0
 
+    const matiereIds = matiere_ids ? JSON.parse(matiere_ids) : []
+    const serieIds = serie_ids ? JSON.parse(serie_ids) : []
+
     if (req.file) {
       const fichier_url = await uploadPDF(req.file)
       await db.query(
-        `UPDATE documents SET titre=$1, description=$2, niveau=$3, cycle=$4,
-         serie_filiere=$5, matiere=$6, type_document=$7, annee_scolaire=$8,
-         fichier_url=$9, statut=$10, actif=$11 WHERE id=$12`,
-        [titre.trim(), description, niveau, cycle, serie_filiere || null, matiere, type_document, annee_scolaire || null, fichier_url, statutFinal, actif, id]
+        `UPDATE documents SET titre=$1, description=$2, niveau=$3, annee_scolaire=$4,
+         fichier_url=$5, statut=$6, actif=$7, categorie_id=$8, type_precis_id=$9, examen_id=$10
+         WHERE id=$11`,
+        [titre.trim(), description, niveau || null, annee_scolaire || null, fichier_url,
+          statutFinal, actif, categorie_id, type_precis_id || null, examen_id || null, id]
       )
     } else {
       await db.query(
-        `UPDATE documents SET titre=$1, description=$2, niveau=$3, cycle=$4,
-         serie_filiere=$5, matiere=$6, type_document=$7, annee_scolaire=$8,
-         statut=$9, actif=$10 WHERE id=$11`,
-        [titre.trim(), description, niveau, cycle, serie_filiere || null, matiere, type_document, annee_scolaire || null, statutFinal, actif, id]
+        `UPDATE documents SET titre=$1, description=$2, niveau=$3, annee_scolaire=$4,
+         statut=$5, actif=$6, categorie_id=$7, type_precis_id=$8, examen_id=$9
+         WHERE id=$10`,
+        [titre.trim(), description, niveau || null, annee_scolaire || null,
+          statutFinal, actif, categorie_id, type_precis_id || null, examen_id || null, id]
       )
+    }
+
+    // On repart de zero sur les liaisons N-N a chaque modification (plus simple et fiable
+    // que de calculer un diff), puis on reinsere la selection actuelle
+    await db.query('DELETE FROM document_matieres WHERE document_id = $1', [id])
+    await db.query('DELETE FROM document_series WHERE document_id = $1', [id])
+    for (const matiereId of matiereIds) {
+      await db.query('INSERT INTO document_matieres (document_id, matiere_id) VALUES ($1, $2)', [id, matiereId])
+    }
+    for (const serieId of serieIds) {
+      await db.query('INSERT INTO document_series (document_id, serie_id) VALUES ($1, $2)', [id, serieId])
     }
 
     await logAction(req, 'modification', 'document', id, `Modification du document "${titre.trim()}" — statut: ${statutFinal}`)

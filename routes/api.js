@@ -20,11 +20,50 @@ const supabase = require('../database/supabase')
 const { PDFDocument, rgb, degrees, StandardFonts } = require('pdf-lib')
 const resend = new Resend(process.env.RESEND_API_KEY)
 const { envoyerEmailBienvenue } = require('../services/email')
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+const { verifierTurnstile } = require('../services/turnstile')
+
 
 // Petit helper pour uniformiser les erreurs JSON
 function fail(res, status, message) {
   return res.status(status).json({ error: message })
 }
+
+
+// Limite les tentatives de connexion/inscription — protège contre le
+// brute-force et la création de comptes en masse par script.
+const limiterAuth = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 8,
+  message: { error: 'Trop de tentatives. Réessaie dans quelques minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
+// Limite les téléchargements et lectures — un utilisateur normal ne
+// consulte pas 40 documents en quelques minutes, un script qui aspire le
+// catalogue oui.
+
+
+const limiterTelechargement = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 heure
+  max: 30,
+  message: { error: 'Limite de téléchargements atteinte. Réessaie dans une heure.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.session.user ? String(req.session.user.id) : ipKeyGenerator(req.ip)),
+})
+
+// Limite la consultation de la liste/fiche des documents — ralentit le
+// scraping automatisé du catalogue.
+const limiterDocuments = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 120,
+  message: { error: 'Trop de requêtes. Réessaie dans quelques minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
 
 
 // Extrait le chemin du fichier dans le bucket, que fichierUrl soit une URL
@@ -98,12 +137,17 @@ function requireAuth(req, res, next) {
 
 // ===================== AUTH =====================
 
-router.post('/auth/register', async (req, res, next) => {
+router.post('/auth/register', limiterAuth, async (req, res, next) => {
   try {
-    const { nom_complet, email, mot_de_passe, niveau_scolaire, classe, filiere } = req.body
+    const { nom_complet, email, mot_de_passe, niveau_scolaire, classe, filiere, turnstileToken } = req.body
 
     if (!nom_complet || !email || !mot_de_passe) {
       return fail(res, 400, 'Tous les champs obligatoires doivent être remplis.')
+    }
+
+    const humainVerifie = await verifierTurnstile(turnstileToken, req.ip)
+    if (!humainVerifie) {
+      return fail(res, 400, 'Vérification de sécurité échouée. Recharge la page et réessaie.')
     }
     if (mot_de_passe.length < 8) {
       return fail(res, 400, 'Le mot de passe doit faire au moins 8 caractères.')
@@ -143,7 +187,7 @@ router.post('/auth/register', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-router.post('/auth/login', async (req, res, next) => {
+router.post('/auth/login', limiterAuth, async (req, res, next) => {
   try {
     const { email, mot_de_passe } = req.body
     if (!email || !mot_de_passe) return fail(res, 400, 'Email et mot de passe requis.')
@@ -307,7 +351,7 @@ router.post('/auth/reset-password/:token', async (req, res, next) => {
 
 // ===================== DOCUMENTS (public) =====================
 
-router.get('/documents/home', async (req, res, next) => {
+router.get('/documents/home', limiterDocuments, async (req, res, next) => {
   try {
     const { rows: documents } = await db.query(
       'SELECT * FROM documents WHERE actif = 1 ORDER BY date_upload DESC LIMIT 6'
@@ -330,9 +374,59 @@ router.get('/documents/home', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-router.get('/documents', async (req, res, next) => {
+router.get('/categories', async (req, res, next) => {
   try {
-    const { q, cycle, matiere, type_document, page = 1 } = req.query
+    const { rows } = await db.query(`
+      SELECT c.id, c.nom, c.slug, c.icone, c.ordre, COUNT(d.id) AS nb_documents
+      FROM categories c
+      LEFT JOIN documents d ON d.categorie_id = c.id AND d.actif = 1
+      GROUP BY c.id, c.nom, c.slug, c.icone, c.ordre
+      ORDER BY c.ordre
+    `)
+    res.json({ categories: rows })
+  } catch (err) { next(err) }
+})
+
+router.get('/types-document', async (req, res, next) => {
+  try {
+    const { categorie_id } = req.query
+    const { rows } = categorie_id
+      ? await db.query('SELECT id, nom FROM types_document WHERE categorie_id = $1 ORDER BY nom', [categorie_id])
+      : await db.query('SELECT id, nom, categorie_id FROM types_document ORDER BY nom')
+    res.json({ types_document: rows })
+  } catch (err) { next(err) }
+})
+
+router.get('/examens', async (req, res, next) => {
+  try {
+    const { rows } = await db.query('SELECT id, nom, type_formation FROM examens ORDER BY ordre, nom')
+    res.json({ examens: rows })
+  } catch (err) { next(err) }
+})
+
+router.get('/matieres', async (req, res, next) => {
+  try {
+    const { rows } = await db.query('SELECT id, nom, domaine_id FROM matieres ORDER BY nom')
+    res.json({ matieres: rows })
+  } catch (err) { next(err) }
+})
+
+router.get('/series', async (req, res, next) => {
+  try {
+    const { examen_id } = req.query
+    if (!examen_id) return res.json({ series: [] })
+    const { rows } = await db.query(
+      'SELECT id, nom, type, groupe FROM series_filieres WHERE examen_id = $1 ORDER BY groupe, ordre, nom',
+      [examen_id]
+    )
+    res.json({ series: rows })
+  } catch (err) { next(err) }
+})
+
+
+router.get('/documents', limiterDocuments, async (req, res, next) => {
+  try {
+    const { q, categorie_id, examen_id, serie_id, matiere_id, type_precis_id, page = 1 } = req.query
     const limit = 12
     const offset = (parseInt(page) - 1) * limit
 
@@ -345,31 +439,43 @@ router.get('/documents', async (req, res, next) => {
       params.push('%' + q + '%', '%' + q + '%')
       i += 2
     }
-    if (cycle) { whereClause += ` AND d.cycle = $${i}`; params.push(cycle); i++ }
-    if (matiere) { whereClause += ` AND d.matiere = $${i}`; params.push(matiere); i++ }
-    if (type_document) { whereClause += ` AND d.type_document = $${i}`; params.push(type_document); i++ }
+    if (categorie_id) { whereClause += ` AND d.categorie_id = $${i}`; params.push(categorie_id); i++ }
+    if (examen_id) { whereClause += ` AND d.examen_id = $${i}`; params.push(examen_id); i++ }
+    if (type_precis_id) { whereClause += ` AND d.type_precis_id = $${i}`; params.push(type_precis_id); i++ }
+    if (serie_id) {
+      whereClause += ` AND EXISTS (SELECT 1 FROM document_series ds WHERE ds.document_id = d.id AND ds.serie_id = $${i})`
+      params.push(serie_id); i++
+    }
+    if (matiere_id) {
+      whereClause += ` AND EXISTS (SELECT 1 FROM document_matieres dm WHERE dm.document_id = d.id AND dm.matiere_id = $${i})`
+      params.push(matiere_id); i++
+    }
 
     const { rows: countRows } = await db.query(`SELECT COUNT(*) as n FROM documents d ${whereClause}`, params)
     const total = parseInt(countRows[0].n)
     const totalPages = Math.ceil(total / limit)
 
     const { rows: documents } = await db.query(
-      `SELECT d.* FROM documents d ${whereClause} ORDER BY d.date_upload DESC LIMIT $${i} OFFSET $${i + 1}`,
+      `SELECT d.*, c.nom AS categorie_nom, e.nom AS examen_nom, td.nom AS type_precis_nom
+       FROM documents d
+       LEFT JOIN categories c ON c.id = d.categorie_id
+       LEFT JOIN examens e ON e.id = d.examen_id
+       LEFT JOIN types_document td ON td.id = d.type_precis_id
+       ${whereClause}
+       ORDER BY d.date_upload DESC LIMIT $${i} OFFSET $${i + 1}`,
       [...params, limit, offset]
     )
 
-    // Liste publique, identique pour tous les visiteurs : cache navigateur/CDN
-    // 30s + revalidation en arriere-plan jusqu'a 2min (stale-while-revalidate)
     res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=120')
     res.json({
       documents,
-      filtres: { q, cycle, matiere, type_document },
+      filtres: { q, categorie_id, examen_id, serie_id, matiere_id, type_precis_id },
       pagination: { page: parseInt(page), totalPages, total },
     })
   } catch (err) { next(err) }
 })
 
-router.get('/documents/:id', async (req, res, next) => {
+router.get('/documents/:id', limiterDocuments, async (req, res, next) => {
   try {
     const { rows } = await db.query('SELECT * FROM documents WHERE id = $1 AND actif = 1', [req.params.id])
     const document = rows[0]
@@ -404,7 +510,7 @@ router.get('/documents/:id', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-router.get('/documents/:id/telecharger', requireAuth, async (req, res, next) => {
+router.get('/documents/:id/telecharger', requireAuth, limiterTelechargement, async (req, res, next) => {
   try {
     const { rows } = await db.query('SELECT * FROM documents WHERE id = $1 AND actif = 1', [req.params.id])
     const document = rows[0]
@@ -429,7 +535,7 @@ router.get('/documents/:id/telecharger', requireAuth, async (req, res, next) => 
   } catch (err) { next(err) }
 })
 
-router.get('/documents/:id/lire', requireAuth, async (req, res, next) => {
+router.get('/documents/:id/lire', requireAuth, limiterTelechargement, async (req, res, next) => {
   try {
     const { rows } = await db.query('SELECT * FROM documents WHERE id = $1 AND actif = 1', [req.params.id])
     const document = rows[0]

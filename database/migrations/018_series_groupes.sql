@@ -1,0 +1,1 @@
+ALTER TABLE series_filieres ADD COLUMN groupe VARCHAR(150);
