@@ -1,6 +1,5 @@
-require('dotenv').config()
-console.log('DATABASE_URL chargée :', !!process.env.DATABASE_URL)
-console.log('PORT :', process.env.PORT)
+if (process.env.NODE_ENV !== 'test') require('dotenv').config()
+
 
 const express = require('express')
 const cors = require('cors')
@@ -64,8 +63,11 @@ app.use(limiterGeneral)
 // Rate limiting connexion — resserré uniquement sur le login
 const limiterConnexion = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
-  message: 'Trop de tentatives de connexion. Réessaie dans 15 minutes.'
+  max: 5,
+  skipSuccessfulRequests: true,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Trop de tentatives de connexion. Réessaie dans 15 minutes.' }
 })
 
 // ========== CONFIGURATION ==========
@@ -92,6 +94,19 @@ app.use(session({
     sameSite: isProd ? 'none' : 'lax'
   }
 }))
+
+
+
+// Protection CSRF : un navigateur envoie toujours l'en-tête Origin sur une
+// requête qui modifie des données. Présent et inconnu → refus.
+app.use((req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next()
+  const origin = req.headers.origin
+  if (origin && !allowedOrigins.includes(origin)) {
+    return res.status(403).json({ error: 'Origine non autorisée.' })
+  }
+  next()
+})
 
 // ========== PASSPORT GOOGLE ==========
 app.use(passport.initialize())
@@ -131,8 +146,33 @@ passport.use(new GoogleStrategy({
   }
 }))
 
+
+
+// Filet de sécurité : ne jamais renvoyer ces champs aux clients (hors admin)
+const CHAMPS_INTERDITS = ['fichier_url', 'mot_de_passe']
+function nettoyerReponse(valeur) {
+  if (Array.isArray(valeur)) return valeur.map(nettoyerReponse)
+  if (valeur && typeof valeur === 'object' && !(valeur instanceof Date)) {
+    const copie = {}
+    for (const [cle, v] of Object.entries(valeur)) {
+      if (CHAMPS_INTERDITS.includes(cle)) continue
+      copie[cle] = nettoyerReponse(v)
+    }
+    return copie
+  }
+  return valeur
+}
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/admin')) return next()
+  const jsonOriginal = res.json.bind(res)
+  res.json = (corps) => jsonOriginal(nettoyerReponse(corps))
+  next()
+})
+
 // ========== API JSON (frontend Next.js) ==========
 app.use('/api', require('./routes/api'))
+app.use('/api/admin/login', limiterConnexion)
+app.use('/api/admin/campagnes', require('./routes/admin-campagnes'))
 app.use('/api/admin', require('./routes/admin-api'))
 
 // Erreurs sur les routes /api : toujours répondre en JSON, jamais en HTML
@@ -216,6 +256,11 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Une erreur est survenue. Réessaie plus tard.' })
 })
 
-app.listen(PORT, () => {
-  console.log(`Serveur démarré sur http://localhost:${PORT}`)
-})
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Serveur démarré sur http://localhost:${PORT}`)
+    require('./services/campagnes').demarrerPlanificateur()
+  })
+}
+
+module.exports = app
