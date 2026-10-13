@@ -15,6 +15,7 @@ const bcrypt = require('bcrypt')
 const crypto = require('crypto')
 const db = require('../database/database')
 const reco = require('../database/recommandation')
+const { COLONNES_DOCUMENT, COLONNES_DOCUMENT_D } = require('../database/colonnes')
 const { Resend } = require('resend')
 const supabase = require('../database/supabase')
 const { PDFDocument, rgb, degrees, StandardFonts } = require('pdf-lib')
@@ -22,6 +23,7 @@ const resend = new Resend(process.env.RESEND_API_KEY)
 const { envoyerEmailBienvenue } = require('../services/email')
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { verifierTurnstile } = require('../services/turnstile')
+const { jetonValide } = require('../utils/desabonnement')
 
 
 // Petit helper pour uniformiser les erreurs JSON
@@ -30,12 +32,53 @@ function fail(res, status, message) {
 }
 
 
+
+// Transforme la saisie en requête de recherche : chaque mot est cherché par son début,
+// sans accent ni majuscule (« maths » trouve « mathématiques »). Seules les lettres et
+// les chiffres sont gardés, ce qui empêche toute injection dans la requête.
+function construireRecherche(q) {
+  const mots = String(q).normalize('NFC').split(/\s+/)
+    .map(m => m.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter(Boolean)
+    .slice(0, 8)
+  return mots.length ? mots.map(m => m + ':*').join(' & ') : null
+}
+
+function construireFiltreRecherche(q, i, params) {
+  const terme = String(q).trim().slice(0, 100)
+  const conditions = []
+  let ordre = 'd.date_upload DESC'
+  const requete = construireRecherche(terme)
+  if (requete) {
+    conditions.push(`d.recherche_vecteur @@ to_tsquery('french_unaccent', $${i})`)
+    ordre = `ts_rank(d.recherche_vecteur, to_tsquery('french_unaccent', $${i})) DESC, d.date_upload DESC`
+    params.push(requete)
+    i++
+  }
+  if (terme.length >= 3) {
+    conditions.push(`d.titre ILIKE $${i}`)
+    params.push('%' + terme + '%')
+    i++
+  }
+  return { clause: conditions.length ? ` AND (${conditions.join(' OR ')})` : ' AND FALSE', ordre, i }
+}
+
+
+const echapperHtml = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 // Limite les tentatives de connexion/inscription — protège contre le
 // brute-force et la création de comptes en masse par script.
 const limiterAuth = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 8,
   message: { error: 'Trop de tentatives. Réessaie dans quelques minutes.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
+const limiterReset = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { error: 'Trop de demandes. Réessaie dans une heure.' },
   standardHeaders: true,
   legacyHeaders: false,
 })
@@ -48,7 +91,20 @@ const limiterAuth = rateLimit({
 const limiterTelechargement = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 heure
   max: 30,
+  skipFailedRequests: true, // un téléchargement qui échoue ne consomme pas le quota
   message: { error: 'Limite de téléchargements atteinte. Réessaie dans une heure.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.session.user ? String(req.session.user.id) : ipKeyGenerator(req.ip)),
+})
+
+// La consultation en ligne a son propre quota, plus large : ouvrir une fiche
+// ne doit pas épuiser les téléchargements.
+const limiterLecture = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 120,
+  skipFailedRequests: true,
+  message: { error: 'Trop de documents consultés. Réessaie dans quelques minutes.' },
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => (req.session.user ? String(req.session.user.id) : ipKeyGenerator(req.ip)),
@@ -202,7 +258,7 @@ router.post('/auth/login', limiterAuth, async (req, res, next) => {
       return fail(res, 403, 'Votre compte a été suspendu.')
     }
 
-    req.session.user = {
+       const utilisateur = {
       id: user.id,
       nom_complet: user.nom_complet,
       email: user.email,
@@ -210,7 +266,14 @@ router.post('/auth/login', limiterAuth, async (req, res, next) => {
       filiere: user.filiere,
     }
 
-    res.json({ user: req.session.user })
+    req.session.regenerate((err) => {
+      if (err) return next(err)
+      req.session.user = utilisateur
+      req.session.save((err2) => {
+        if (err2) return next(err2)
+        res.json({ user: utilisateur })
+      })
+    })
   } catch (err) { next(err) }
 })
 
@@ -263,7 +326,7 @@ router.get('/auth/profile/full', requireAuth, async (req, res, next) => {
     )
 
     res.json({
-      user: userRows[0],
+           user: (({ mot_de_passe, ...reste }) => reste)(userRows[0]),
       commentaires,
       stats: {
         total_commentaires: commentaires.length,
@@ -274,7 +337,7 @@ router.get('/auth/profile/full', requireAuth, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
-router.post('/auth/forgot-password', async (req, res, next) => {
+router.post('/auth/forgot-password', limiterReset, async (req, res, next) => {
   try {
     const { email } = req.body
     const { rows } = await db.query('SELECT * FROM users WHERE email = $1', [(email || '').toLowerCase().trim()])
@@ -282,12 +345,13 @@ router.post('/auth/forgot-password', async (req, res, next) => {
     const message = 'Si cet email existe, un lien de réinitialisation a été envoyé.'
 
     if (!user) return res.json({ message })
-
     const token = crypto.randomBytes(32).toString('hex')
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
     const expiration = new Date(Date.now() + 1000 * 60 * 60)
+    await db.query('UPDATE reset_tokens SET utilise = TRUE WHERE user_id = $1 AND utilise = FALSE', [user.id])
     await db.query(
       'INSERT INTO reset_tokens (user_id, token, expire_le) VALUES ($1, $2, $3)',
-      [user.id, token, expiration]
+      [user.id, tokenHash, expiration]
     )
 
     const lien = `${process.env.FRONTEND_URLS.split(',')[0]}/reinitialiser-mot-de-passe/${token}`
@@ -301,7 +365,7 @@ router.post('/auth/forgot-password', async (req, res, next) => {
             <span style="font-size:1.5rem;font-weight:900;color:#F59E0B;">EDUBF</span>
           </div>
           <h2 style="color:#0F172A;margin-bottom:0.5rem;">Réinitialisation de mot de passe</h2>
-          <p style="color:#475569;">Bonjour ${user.nom_complet},</p>
+          <p style="color:#475569;">Bonjour ${echapperHtml(user.nom_complet)},</p>
           <p style="color:#475569;">Tu as demandé à réinitialiser ton mot de passe. Clique sur le bouton ci-dessous :</p>
           <div style="text-align:center;margin:2rem 0;">
             <a href="${lien}" style="background:#F59E0B;color:white;padding:0.8rem 2rem;border-radius:8px;text-decoration:none;font-weight:700;display:inline-block;">
@@ -321,16 +385,16 @@ router.get('/auth/reset-password/:token', async (req, res, next) => {
   try {
     const { rows } = await db.query(
       'SELECT * FROM reset_tokens WHERE token = $1 AND utilise = FALSE AND expire_le > NOW()',
-      [req.params.token]
+           [crypto.createHash('sha256').update(req.params.token).digest('hex')]
     )
     res.json({ valid: !!rows[0] })
   } catch (err) { next(err) }
 })
 
-router.post('/auth/reset-password/:token', async (req, res, next) => {
+router.post('/auth/reset-password/:token', limiterReset, async (req, res, next) => {
   try {
     const { mot_de_passe, confirmation } = req.body
-    const token = req.params.token
+      const token = crypto.createHash('sha256').update(req.params.token).digest('hex')
 
     if (mot_de_passe !== confirmation) return fail(res, 400, 'Les mots de passe ne correspondent pas.')
     if (!mot_de_passe || mot_de_passe.length < 8) return fail(res, 400, 'Le mot de passe doit faire au moins 8 caractères.')
@@ -354,7 +418,7 @@ router.post('/auth/reset-password/:token', async (req, res, next) => {
 router.get('/documents/home', limiterDocuments, async (req, res, next) => {
   try {
     const { rows: documents } = await db.query(
-      'SELECT * FROM documents WHERE actif = 1 ORDER BY date_upload DESC LIMIT 6'
+      `SELECT ${COLONNES_DOCUMENT} FROM documents WHERE actif = 1 ORDER BY date_upload DESC LIMIT 6`
     )
     const { rows } = await db.query('SELECT COUNT(*) as n FROM documents WHERE actif = 1')
     const totalDocs = parseInt(rows[0].n)
@@ -406,7 +470,7 @@ router.get('/examens', async (req, res, next) => {
 
 router.get('/matieres', async (req, res, next) => {
   try {
-    const { rows } = await db.query('SELECT id, nom, domaine_id FROM matieres ORDER BY nom')
+        const { rows } = await db.query('SELECT MIN(id) AS id, nom FROM matieres GROUP BY nom ORDER BY nom')
     res.json({ matieres: rows })
   } catch (err) { next(err) }
 })
@@ -434,10 +498,12 @@ router.get('/documents', limiterDocuments, async (req, res, next) => {
     const params = []
     let i = 1
 
+       let ordre = 'd.date_upload DESC'
     if (q) {
-      whereClause += ` AND (d.titre ILIKE $${i} OR d.description ILIKE $${i + 1})`
-      params.push('%' + q + '%', '%' + q + '%')
-      i += 2
+      const filtre = construireFiltreRecherche(q, i, params)
+      whereClause += filtre.clause
+      ordre = filtre.ordre
+      i = filtre.i
     }
     if (categorie_id) { whereClause += ` AND d.categorie_id = $${i}`; params.push(categorie_id); i++ }
     if (examen_id) { whereClause += ` AND d.examen_id = $${i}`; params.push(examen_id); i++ }
@@ -446,8 +512,13 @@ router.get('/documents', limiterDocuments, async (req, res, next) => {
       whereClause += ` AND EXISTS (SELECT 1 FROM document_series ds WHERE ds.document_id = d.id AND ds.serie_id = $${i})`
       params.push(serie_id); i++
     }
-    if (matiere_id) {
-      whereClause += ` AND EXISTS (SELECT 1 FROM document_matieres dm WHERE dm.document_id = d.id AND dm.matiere_id = $${i})`
+        if (matiere_id) {
+      whereClause += ` AND EXISTS (
+        SELECT 1 FROM document_matieres dm
+        JOIN matieres m ON m.id = dm.matiere_id
+        WHERE dm.document_id = d.id
+          AND m.nom = (SELECT nom FROM matieres WHERE id = $${i})
+      )`
       params.push(matiere_id); i++
     }
 
@@ -456,13 +527,13 @@ router.get('/documents', limiterDocuments, async (req, res, next) => {
     const totalPages = Math.ceil(total / limit)
 
     const { rows: documents } = await db.query(
-      `SELECT d.*, c.nom AS categorie_nom, e.nom AS examen_nom, td.nom AS type_precis_nom
+      `SELECT ${COLONNES_DOCUMENT_D}, c.nom AS categorie_nom, e.nom AS examen_nom, td.nom AS type_precis_nom
        FROM documents d
        LEFT JOIN categories c ON c.id = d.categorie_id
        LEFT JOIN examens e ON e.id = d.examen_id
        LEFT JOIN types_document td ON td.id = d.type_precis_id
        ${whereClause}
-       ORDER BY d.date_upload DESC LIMIT $${i} OFFSET $${i + 1}`,
+      ORDER BY ${ordre} LIMIT $${i} OFFSET $${i + 1}`,
       [...params, limit, offset]
     )
 
@@ -475,9 +546,283 @@ router.get('/documents', limiterDocuments, async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+
+
+
+// ==========================================================================
+// CONCOURS — routes publiques (utilisateur connecte)
+// ==========================================================================
+
+router.get('/concours/domaines', async (req, res, next) => {
+  try {
+    const { rows } = await db.query(
+      'SELECT id, nom, icone FROM concours.domaines WHERE actif = true ORDER BY nom'
+    )
+    res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600')
+    res.json({ domaines: rows })
+  } catch (err) { next(err) }
+})
+
+router.get('/concours/domaines/:id/series', async (req, res, next) => {
+  try {
+    const userId = req.session.user?.id || null
+    const { rows } = await db.query(`
+      SELECT s.id, s.titre, s.description, s.difficulte, s.nb_questions_cible,
+        prog.meilleur_score, prog.nb_tentatives
+      FROM concours.series s
+      LEFT JOIN LATERAL (
+        SELECT MAX(sess.score) AS meilleur_score, COUNT(*)::int AS nb_tentatives
+        FROM concours.sessions sess
+        WHERE sess.serie_id = s.id AND sess.user_id = $2 AND sess.statut = 'terminee'
+      ) prog ON $2::int IS NOT NULL
+      WHERE s.domaine_id = $1 AND s.statut = 'publiee'
+      ORDER BY s.date_publication DESC
+    `, [req.params.id, userId])
+    res.set('Cache-Control', 'private, max-age=0, must-revalidate')
+    res.json({ series: rows })
+  } catch (err) { next(err) }
+})
+
+// Demarre une session : soit depuis une serie precise, soit en entrainement
+// personnalise (domaine_ids + nb_questions). Cree le SNAPSHOT immediatement —
+// a partir d'ici, la session ne relit plus jamais concours.questions.
+router.post('/concours/sessions', requireAuth, async (req, res, next) => {
+  try {
+    const { serie_id, domaine_ids, nb_questions, difficulte } = req.body
+    let questions
+
+    if (serie_id) {
+      const { rows: serieRows } = await db.query(
+        `SELECT * FROM concours.series WHERE id = $1 AND statut = 'publiee'`, [serie_id]
+      )
+      if (!serieRows[0]) return fail(res, 404, 'Série introuvable ou non publiée.')
+            const { rows } = await db.query(`
+        SELECT q.id, q.type, q.enonce, q.difficulte, q.explication, q.reponse_texte,
+          (SELECT json_agg(json_build_object('id', p.id, 'texte', p.texte, 'correcte', p.est_correcte) ORDER BY p.ordre)
+           FROM concours.propositions p WHERE p.question_id = q.id) AS propositions
+        FROM concours.serie_questions sq
+        JOIN concours.questions q ON q.id = sq.question_id AND q.statut = 'publiee'
+        WHERE sq.serie_id = $1
+        ORDER BY sq.ordre
+      `, [serie_id])
+      questions = rows
+    } else {
+          if (!Array.isArray(domaine_ids) || domaine_ids.length === 0 || domaine_ids.length > 20) {
+        return fail(res, 400, 'Choisis entre 1 et 20 domaines.')
+      }
+      const n = Math.min(Math.max(parseInt(nb_questions) || 20, 1), 100)
+      const params = [domaine_ids, n]
+      let filtreDifficulte = ''
+      if (difficulte) { filtreDifficulte = 'AND q.difficulte = $3'; params.push(difficulte) }
+
+            const { rows } = await db.query(`
+        SELECT q.id, q.type, q.enonce, q.difficulte, q.explication, q.reponse_texte,
+          (SELECT json_agg(json_build_object('id', p.id, 'texte', p.texte, 'correcte', p.est_correcte) ORDER BY p.ordre)
+           FROM concours.propositions p WHERE p.question_id = q.id) AS propositions
+        FROM concours.questions q
+        WHERE q.domaine_id = ANY($1) AND q.statut = 'publiee' ${filtreDifficulte}
+        ORDER BY RANDOM() LIMIT $2
+      `, params)
+      questions = rows
+    }
+
+    if (questions.length === 0) return fail(res, 400, 'Aucune question disponible pour ces critères.')
+
+    const { rows: sessionRows } = await db.query(
+      `INSERT INTO concours.sessions (user_id, serie_id, domaines_choisis, nb_questions, statut)
+       VALUES ($1,$2,$3,$4,'en_cours') RETURNING id`,
+      [req.session.user.id, serie_id || null, serie_id ? null : JSON.stringify(domaine_ids), questions.length]
+    )
+    const sessionId = sessionRows[0].id
+
+    for (const [i, q] of questions.entries()) {
+      await db.query(
+        `INSERT INTO concours.session_questions (session_id, question_id, ordre, contenu_snapshot)
+         VALUES ($1,$2,$3,$4)`,
+        [sessionId, q.id, i, JSON.stringify({
+          enonce: q.enonce, type: q.type, difficulte: q.difficulte,
+                   explication: q.explication, propositions: q.propositions || null,
+          reponse_texte: q.reponse_texte || null,
+        })]
+      )
+    }
+
+    res.status(201).json({ session_id: sessionId, nb_questions: questions.length })
+  } catch (err) { next(err) }
+})
+
+
+router.get('/concours/mes-sessions', requireAuth, async (req, res, next) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT sess.id, sess.nb_questions, sess.score, sess.statut,
+        sess.date_debut, sess.date_fin, s.titre AS serie_titre, s.id AS serie_id,
+        sess.domaines_choisis
+      FROM concours.sessions sess
+      LEFT JOIN concours.series s ON s.id = sess.serie_id
+      WHERE sess.user_id = $1
+      ORDER BY sess.date_debut DESC
+      LIMIT 50
+    `, [req.session.user.id])
+    res.set('Cache-Control', 'private, max-age=0, must-revalidate')
+    res.json({ sessions: rows })
+  } catch (err) { next(err) }
+})
+
+router.use('/concours/sessions/:id', (req, res, next) => {
+  if (!/^\d+$/.test(req.params.id)) return fail(res, 404, 'Session introuvable.')
+  next()
+})
+
+// Contenu de la session pour PASSER le quiz — les bonnes reponses sont
+// retirees ici, elles n'apparaissent qu'au resultat final.
+router.get('/concours/sessions/:id', requireAuth, async (req, res, next) => {
+  try {
+    const { rows: sessionRows } = await db.query(
+      'SELECT * FROM concours.sessions WHERE id = $1 AND user_id = $2',
+      [req.params.id, req.session.user.id]
+    )
+    if (!sessionRows[0]) return fail(res, 404, 'Session introuvable.')
+
+    const { rows: sq } = await db.query(
+      'SELECT id, question_id, ordre, contenu_snapshot FROM concours.session_questions WHERE session_id = $1 ORDER BY ordre',
+      [req.params.id]
+    )
+    const { rows: reponsesDeja } = await db.query(
+      'SELECT session_question_id FROM concours.reponses_session WHERE session_id = $1',
+      [req.params.id]
+    )
+    const idsReponduees = new Set(reponsesDeja.map(r => r.session_question_id))
+
+    const questions = sq.map(q => ({
+      session_question_id: q.id,
+      ordre: q.ordre,
+      enonce: q.contenu_snapshot.enonce,
+      type: q.contenu_snapshot.type,
+      difficulte: q.contenu_snapshot.difficulte,
+      propositions: q.contenu_snapshot.propositions
+        ? q.contenu_snapshot.propositions.map(p => ({ id: p.id, texte: p.texte }))
+        : null,
+      deja_repondue: idsReponduees.has(q.id),
+    }))
+
+    res.json({ session: sessionRows[0], questions })
+  } catch (err) { next(err) }
+})
+
+router.post('/concours/sessions/:id/reponses', requireAuth, async (req, res, next) => {
+  try {
+    const { session_question_id, proposition_choisie_id, reponse_texte_donnee } = req.body
+        if (reponse_texte_donnee && String(reponse_texte_donnee).length > 500) {
+      return fail(res, 400, 'Réponse trop longue.')
+    }
+    const { rows: sessionRows } = await db.query(
+      `SELECT * FROM concours.sessions WHERE id = $1 AND user_id = $2 AND statut = 'en_cours'`,
+      [req.params.id, req.session.user.id]
+    )
+    if (!sessionRows[0]) return fail(res, 404, 'Session introuvable ou déjà terminée.')
+
+    const { rows: sqRows } = await db.query(
+      'SELECT * FROM concours.session_questions WHERE id = $1 AND session_id = $2',
+      [session_question_id, req.params.id]
+    )
+    if (!sqRows[0]) return fail(res, 404, 'Question introuvable dans cette session.')
+
+    const snapshot = sqRows[0].contenu_snapshot
+    let correcte
+    if (snapshot.propositions) {
+      const bonne = snapshot.propositions.find(p => p.correcte)
+      correcte = bonne && String(bonne.id) === String(proposition_choisie_id)
+    } else {
+            const attendue = (snapshot.reponse_texte || '').trim().toLowerCase()
+      const donnee = (reponse_texte_donnee || '').trim().toLowerCase()
+      correcte = attendue !== '' && donnee === attendue
+    }
+
+       const { rows: inseree } = await db.query(
+      `INSERT INTO concours.reponses_session (session_id, session_question_id, proposition_choisie_id, reponse_texte_donnee, correcte)
+       VALUES ($1,$2,$3,$4,$5)
+       ON CONFLICT (session_id, session_question_id) DO NOTHING
+       RETURNING id`,
+      [req.params.id, session_question_id, proposition_choisie_id || null, reponse_texte_donnee || null, !!correcte]
+    )
+    if (!inseree[0]) return fail(res, 409, 'Tu as déjà répondu à cette question.')
+
+    res.status(201).json({ success: true })
+  } catch (err) { next(err) }
+})
+
+router.put('/concours/sessions/:id/terminer', requireAuth, async (req, res, next) => {
+  try {
+    const { rows: sessions } = await db.query(
+      `SELECT id FROM concours.sessions WHERE id = $1 AND user_id = $2 AND statut = 'en_cours'`,
+      [req.params.id, req.session.user.id]
+    )
+    if (!sessions[0]) return fail(res, 404, 'Session introuvable ou déjà terminée.')
+
+    const { rows: reponses } = await db.query(
+      'SELECT COUNT(*) FILTER (WHERE correcte) as bonnes FROM concours.reponses_session WHERE session_id = $1',
+      [req.params.id]
+    )
+    const score = parseInt(reponses[0].bonnes)
+
+    await db.query(
+      `UPDATE concours.sessions SET statut = 'terminee', score = $1, date_fin = NOW()
+       WHERE id = $2 AND user_id = $3`,
+      [score, req.params.id, req.session.user.id]
+    )
+
+    res.json({ score })
+  } catch (err) { next(err) }
+})
+
+
+
+
+
+
+router.get('/concours/sessions/:id/resultat', requireAuth, async (req, res, next) => {
+  try {
+    const { rows: sessionRows } = await db.query(
+      `SELECT * FROM concours.sessions WHERE id = $1 AND user_id = $2 AND statut = 'terminee'`,
+      [req.params.id, req.session.user.id]
+    )
+    if (!sessionRows[0]) return fail(res, 404, 'Résultat non disponible (session introuvable ou non terminée).')
+    const session = sessionRows[0]
+
+    const { rows: sq } = await db.query(
+      `SELECT sq.id, sq.ordre, sq.contenu_snapshot, rs.proposition_choisie_id, rs.reponse_texte_donnee, rs.correcte
+       FROM concours.session_questions sq
+       LEFT JOIN concours.reponses_session rs ON rs.session_question_id = sq.id
+       WHERE sq.session_id = $1 ORDER BY sq.ordre`,
+      [req.params.id]
+    )
+
+    const questions = sq.map(q => ({
+      ordre: q.ordre,
+      enonce: q.contenu_snapshot.enonce,
+      explication: q.contenu_snapshot.explication,
+      propositions: q.contenu_snapshot.propositions || null,
+      reponse_correcte_texte: q.contenu_snapshot.propositions ? null : q.contenu_snapshot.reponse_texte,
+      proposition_choisie_id: q.proposition_choisie_id,
+      reponse_texte_donnee: q.reponse_texte_donnee,
+      correcte: q.correcte,
+    }))
+
+    res.json({
+      score: session.score,
+      total: session.nb_questions,
+      pourcentage: Math.round((session.score / session.nb_questions) * 100),
+      questions,
+    })
+  } catch (err) { next(err) }
+})
+
+
+
 router.get('/documents/:id', limiterDocuments, async (req, res, next) => {
   try {
-    const { rows } = await db.query('SELECT * FROM documents WHERE id = $1 AND actif = 1', [req.params.id])
+    const { rows } = await db.query(`SELECT ${COLONNES_DOCUMENT} FROM documents WHERE id = $1 AND actif = 1`, [req.params.id])
     const document = rows[0]
     if (!document) return fail(res, 404, 'Document introuvable.')
 
@@ -509,15 +854,11 @@ router.get('/documents/:id', limiterDocuments, async (req, res, next) => {
     res.json({ document, commentaires, estFavori, similaires })
   } catch (err) { next(err) }
 })
-
 router.get('/documents/:id/telecharger', requireAuth, limiterTelechargement, async (req, res, next) => {
   try {
     const { rows } = await db.query('SELECT * FROM documents WHERE id = $1 AND actif = 1', [req.params.id])
     const document = rows[0]
     if (!document) return fail(res, 404, 'Document introuvable.')
-
-    await db.query('UPDATE documents SET nb_telechargements = nb_telechargements + 1 WHERE id = $1', [document.id])
-    reco.enregistrerAction(req.session.user.id, document.id, 'telechargement').catch(() => {})
 
     // Récupère le fichier original depuis Supabase, ajoute le filigrane, puis
     // renvoie directement le PDF modifié — le téléchargement ne dépend plus
@@ -527,7 +868,21 @@ router.get('/documents/:id/telecharger', requireAuth, limiterTelechargement, asy
     if (error) throw new Error('Impossible de récupérer le fichier : ' + error.message)
 
     const pdfBytesOriginal = Buffer.from(await data.arrayBuffer())
-    const pdfBytesFiligrane = await filigranerPdf(pdfBytesOriginal)
+
+    let pdfBytesFiligrane
+    try {
+      pdfBytesFiligrane = await filigranerPdf(pdfBytesOriginal)
+    } catch (err) {
+      if (/encrypted/i.test(err.message)) {
+        console.error(`PDF protégé : filigrane impossible pour le document ${document.id}`)
+        return fail(res, 422, "Ce document ne peut pas être téléchargé pour le moment. Tu peux le consulter en ligne.")
+      }
+      throw err
+    }
+
+    // Le compteur n'augmente qu'une fois le fichier prêt à être envoyé
+    await db.query('UPDATE documents SET nb_telechargements = nb_telechargements + 1 WHERE id = $1', [document.id])
+    reco.enregistrerAction(req.session.user.id, document.id, 'telechargement').catch(() => {})
 
     res.set('Content-Type', 'application/pdf')
     res.set('Content-Disposition', `attachment; filename="${document.titre.replace(/[^a-z0-9]/gi, '_')}.pdf"`)
@@ -535,8 +890,7 @@ router.get('/documents/:id/telecharger', requireAuth, limiterTelechargement, asy
   } catch (err) { next(err) }
 })
 
-router.get('/documents/:id/lire', requireAuth, limiterTelechargement, async (req, res, next) => {
-  try {
+router.get('/documents/:id/lire', requireAuth, limiterLecture, async (req, res, next) => {  try {
     const { rows } = await db.query('SELECT * FROM documents WHERE id = $1 AND actif = 1', [req.params.id])
     const document = rows[0]
     if (!document) return fail(res, 404, 'Document introuvable.')
@@ -588,7 +942,7 @@ router.post('/documents/:id/favori', requireAuth, async (req, res, next) => {
 router.get('/favoris', requireAuth, async (req, res, next) => {
   try {
     const { rows: favoris } = await db.query(`
-      SELECT d.* FROM favoris f
+      SELECT ${COLONNES_DOCUMENT_D} FROM favoris f
       JOIN documents d ON f.document_id = d.id
       WHERE f.user_id = $1 AND d.actif = 1
       ORDER BY f.date_ajout DESC
@@ -627,6 +981,27 @@ router.post('/contact', async (req, res, next) => {
 
 
 // ===================== NEWSLETTER =====================
+
+function pageSimple(message) {
+  return `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EduBF</title></head><body style="font-family:sans-serif;max-width:480px;margin:60px auto;padding:0 16px;text-align:center"><h2>EduBF</h2><p>${message}</p></body></html>`
+}
+
+router.get('/desabonnement', async (req, res, next) => {
+  try {
+    const email = String(req.query.email || '').toLowerCase().trim()
+    const token = String(req.query.token || '')
+    if (!email || !jetonValide(email, token)) {
+      return res.status(400).type('html').send(pageSimple('Lien invalide ou expiré.'))
+    }
+    await db.query(
+      'INSERT INTO email_desabonnes (email) VALUES ($1) ON CONFLICT (email) DO NOTHING',
+      [email]
+    )
+    res.type('html').send(pageSimple('Tu es désabonné. Tu ne recevras plus nos annonces.'))
+  } catch (err) { next(err) }
+})
+
+
 
 router.post('/newsletter/abonner', async (req, res, next) => {
   try {

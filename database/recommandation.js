@@ -7,7 +7,7 @@
  */
 
 const db = require('./database')
-
+const { COLONNES_DOCUMENT, COLONNES_DOCUMENT_D } = require('./colonnes')
 // ===== POIDS DES ACTIONS =====
 const POIDS = {
   vue: 1,
@@ -148,7 +148,7 @@ async function getRecommandations(userId, options = {}) {
     const queryParams = [userId, ...matieresPreferees, ...cyclesPreferres]
 
     const { rows: recommandations } = await db.query(
-      `SELECT d.*,
+      `SELECT ${COLONNES_DOCUMENT_D},
         COALESCE(rs.score, 0)
         + CASE WHEN d.serie_filiere ILIKE $1_filiere OR d.cycle ILIKE $1_filiere THEN 20 ELSE 0 END
         + CASE ${matieresSQL} ELSE 0 END
@@ -191,7 +191,7 @@ async function getFallback(userId, limite = 6) {
     )
     const filiere = userRows[0]?.filiere_preferee
 
-    let query = 'SELECT * FROM documents WHERE actif = 1'
+    let query = `SELECT ${COLONNES_DOCUMENT} FROM documents WHERE actif = 1`
     const params = []
 
     if (filiere) {
@@ -217,7 +217,7 @@ async function getRecommandationsVisiteur(limite = 6) {
   try {
     // Pour les visiteurs : documents populaires récents
     const { rows } = await db.query(
-      `SELECT * FROM documents WHERE actif = 1
+      `SELECT ${COLONNES_DOCUMENT} FROM documents WHERE actif = 1
        ORDER BY
          (nb_telechargements * 0.7) +
          (CASE WHEN date_upload > NOW() - INTERVAL '30 days' THEN 20 ELSE 0 END) +
@@ -244,7 +244,7 @@ async function getDocumentsSimilaires(documentId, limite = 4) {
     const { cycle, matiere, serie_filiere } = doc[0]
 
     const { rows } = await db.query(
-      `SELECT *, (
+     `SELECT ${COLONNES_DOCUMENT}, (
         CASE WHEN matiere = $2 THEN 10 ELSE 0 END +
         CASE WHEN cycle = $3 THEN 5 ELSE 0 END +
         CASE WHEN serie_filiere = $4 THEN 8 ELSE 0 END +
