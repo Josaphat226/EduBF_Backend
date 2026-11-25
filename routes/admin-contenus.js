@@ -392,8 +392,8 @@ router.get('/', async (req, res, next) => {
               ex.nom AS examen, c.origine, c.actif, c.date_creation, c.date_modification, c.date_publication,
               vp.numero AS version_publiee, vt.numero AS version_travail, vt.statut AS statut_travail,
               vp.pdf_statut, COUNT(*) OVER() AS total
-         FROM pedagogie.contenus c
-         JOIN niveaux_scolaires n ON n.id = c.niveau_id
+                FROM pedagogie.contenus c
+         LEFT JOIN niveaux_scolaires n ON n.id = c.niveau_id
          JOIN matieres m ON m.id = c.matiere_id
          LEFT JOIN examens ex ON ex.id = c.examen_id
          LEFT JOIN pedagogie.versions vp ON vp.id = c.version_publiee_id
@@ -738,20 +738,23 @@ router.patch('/:id/actif', async (req, res, next) => {
   } catch (err) { gererErreur(err, res, next) }
 })
 
-// Suppression : uniquement un contenu qui n'a jamais été publié
+// Suppression : un contenu jamais publié, ou déjà retiré (il faut d'abord le retirer)
 router.delete('/:id', async (req, res, next) => {
   try {
     const { rows } = await db.query(
-      `SELECT c.titre,
+      `SELECT c.titre, c.actif,
               EXISTS (SELECT 1 FROM pedagogie.versions v
                        WHERE v.contenu_id = c.id AND v.statut IN ('publiee', 'archivee')) AS deja_publie
          FROM pedagogie.contenus c WHERE c.id = $1`,
       [req.params.id]
     )
     if (!rows[0]) return fail(res, 404, 'Contenu introuvable.')
-    if (rows[0].deja_publie) return fail(res, 409, 'Un contenu déjà publié ne se supprime pas : dépubliez-le.')
+    if (rows[0].deja_publie && rows[0].actif) return fail(res, 409, 'Ce contenu est en ligne : retirez-le d’abord, puis supprimez-le.')
 
+    // On note les PDF avant de supprimer, pour les effacer du stockage ensuite
+    const pdf = await db.query('SELECT pdf_sujet_url, pdf_corrige_url FROM pedagogie.versions WHERE contenu_id = $1', [req.params.id])
     await db.query('DELETE FROM pedagogie.contenus WHERE id = $1', [req.params.id])
+    await supprimerPdf(pdf.rows.flatMap((r) => [r.pdf_sujet_url, r.pdf_corrige_url]))
     await logAction(db, req, 'suppression', req.params.id, `Suppression du contenu « ${rows[0].titre} »`)
     res.json({ success: true })
   } catch (err) { gererErreur(err, res, next) }
