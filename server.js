@@ -9,6 +9,7 @@ const helmet = require('helmet')
 const rateLimit = require('express-rate-limit')
 const path = require('path')
 const db = require('./database/database')
+const { enregistrerRecherche } = require('./services/stats')
 
 const passport = require('passport')
 const GoogleStrategy = require('passport-google-oauth20').Strategy
@@ -73,7 +74,7 @@ const limiterConnexion = rateLimit({
 // ========== CONFIGURATION ==========
 
 app.use(express.urlencoded({ extended: true }))
-app.use(express.json())
+app.use(express.json({ limit: '2mb' }))
 
 
 const isProd = process.env.NODE_ENV === 'production'
@@ -170,9 +171,13 @@ app.use('/api', (req, res, next) => {
 })
 
 // ========== API JSON (frontend Next.js) ==========
+app.use('/api/contenus', require('./routes/contenus-public'))
+app.use('/api/stats', require('./routes/stats-public'))
 app.use('/api', require('./routes/api'))
 app.use('/api/admin/login', limiterConnexion)
 app.use('/api/admin/campagnes', require('./routes/admin-campagnes'))
+app.use('/api/admin/contenus', require('./routes/admin-contenus'))
+app.use('/api/admin/statistiques', require('./routes/admin-statistiques'))
 app.use('/api/admin', require('./routes/admin-api'))
 
 // Erreurs sur les routes /api : toujours répondre en JSON, jamais en HTML

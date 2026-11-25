@@ -1,0 +1,362 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://edubf.net/schemas/contenu-v1.json",
+  "title": "Contenu pédagogique EduBF — schéma v1",
+  "description": "Document stocké dans pedagogie.versions.contenu_json. Hiérarchie : parties > exercices > questions > sous-questions. Chaque texte (énoncé, consigne, corrigé) est un document TipTap/ProseMirror enrichi de quelques nœuds EduBF (formules, figures, graphiques, zones de réponse). Les règles que JSON Schema ne sait pas exprimer sont vérifiées par validation.js.",
+  "type": "object",
+  "required": ["version_schema", "parties"],
+  "additionalProperties": false,
+  "properties": {
+    "version_schema": { "const": 1 },
+    "entete": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "consignes": { "$ref": "#/definitions/RichDoc" },
+        "materiel": { "type": "string", "maxLength": 200 },
+        "duree_minutes": { "type": "integer", "minimum": 1, "maximum": 600 },
+        "bareme_total": { "$ref": "#/definitions/Points" }
+      }
+    },
+    "parties": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/Partie" }
+    }
+  },
+
+  "definitions": {
+    "Id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{6,36}$"
+    },
+    "Points": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000,
+      "multipleOf": 0.25
+    },
+    "Etiquette": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 20
+    },
+
+    "Partie": {
+      "type": "object",
+      "required": ["id", "exercices"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/Id" },
+        "titre": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "consignes": { "$ref": "#/definitions/RichDoc" },
+        "annexes": { "type": "array", "items": { "$ref": "#/definitions/Annexe" } },
+        "duree_minutes": { "type": "integer", "minimum": 1, "maximum": 600 },
+        "points": { "$ref": "#/definitions/Points" },
+        "exercices": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/Exercice" } }
+      }
+    },
+
+    "Exercice": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "anyOf": [{ "required": ["enonce"] }, { "required": ["questions"] }],
+      "properties": {
+        "id": { "$ref": "#/definitions/Id" },
+        "etiquette": { "$ref": "#/definitions/Etiquette" },
+        "titre": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "enonce": { "$ref": "#/definitions/RichDoc" },
+        "annexes": { "type": "array", "items": { "$ref": "#/definitions/Annexe" } },
+        "duree_minutes": { "type": "integer", "minimum": 1, "maximum": 600 },
+        "points": { "$ref": "#/definitions/Points" },
+        "questions": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/Question" } },
+        "corrige": { "$ref": "#/definitions/Corrige" }
+      }
+    },
+
+    "Question": {
+      "type": "object",
+      "required": ["id", "enonce"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/Id" },
+        "etiquette": { "$ref": "#/definitions/Etiquette" },
+        "enonce": { "$ref": "#/definitions/RichDoc" },
+        "points": { "$ref": "#/definitions/Points" },
+        "verification": { "$ref": "#/definitions/Verification" },
+        "sous_questions": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/Question" } },
+        "corrige": { "$ref": "#/definitions/Corrige" }
+      }
+    },
+
+    "Annexe": {
+      "type": "object",
+      "required": ["id", "titre", "doc"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/definitions/Id" },
+        "titre": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "source": { "type": "string", "maxLength": 300 },
+        "doc": { "$ref": "#/definitions/RichDoc" }
+      }
+    },
+
+    "Corrige": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "reponse_attendue": { "$ref": "#/definitions/RichDoc" },
+        "methode": { "$ref": "#/definitions/RichDoc" },
+        "etapes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["doc"],
+            "additionalProperties": false,
+            "properties": {
+              "titre": { "type": "string", "minLength": 1, "maxLength": 200 },
+              "doc": { "$ref": "#/definitions/RichDoc" }
+            }
+          }
+        },
+        "bareme": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["critere", "points"],
+            "additionalProperties": false,
+            "properties": {
+              "critere": { "type": "string", "minLength": 1, "maxLength": 300 },
+              "points": { "$ref": "#/definitions/Points" }
+            }
+          }
+        },
+        "remarque": { "$ref": "#/definitions/RichDoc" }
+      }
+    },
+
+    "Verification": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["mode", "propositions", "correctes"],
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "const": "qcm" },
+            "propositions": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 8,
+              "items": {
+                "type": "object",
+                "required": ["id", "texte"],
+                "additionalProperties": false,
+                "properties": {
+                  "id": { "$ref": "#/definitions/Id" },
+                  "texte": { "type": "string", "minLength": 1, "maxLength": 500 }
+                }
+              }
+            },
+            "correctes": { "type": "array", "minItems": 1, "items": { "$ref": "#/definitions/Id" } }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["mode", "valeur"],
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "const": "numerique" },
+            "valeur": { "type": "number" },
+            "tolerance": { "type": "number", "minimum": 0 },
+            "unite": { "type": "string", "maxLength": 30 }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["mode", "acceptees"],
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "const": "texte_court" },
+            "acceptees": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "maxLength": 200 } },
+            "sensible_casse": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["mode", "attendu"],
+          "additionalProperties": false,
+          "properties": {
+            "mode": { "const": "vrai_faux" },
+            "attendu": { "type": "boolean" }
+          }
+        }
+      ]
+    },
+
+    "RichDoc": {
+      "type": "object",
+      "required": ["type", "content"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "doc" },
+        "content": { "type": "array", "items": { "$ref": "#/definitions/RichNode" } }
+      }
+    },
+
+    "Mark": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "enum": ["bold", "italic", "underline", "subscript", "superscript"] }
+      }
+    },
+
+    "RichNode": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "paragraph", "text", "hardBreak", "heading",
+            "bulletList", "orderedList", "listItem", "blockquote", "horizontalRule",
+            "table", "tableRow", "tableHeader", "tableCell",
+            "formuleInline", "formuleBloc", "figure", "graphique", "zoneReponse"
+          ]
+        },
+        "attrs": { "type": "object" },
+        "content": { "type": "array", "items": { "$ref": "#/definitions/RichNode" } },
+        "marks": { "type": "array", "items": { "$ref": "#/definitions/Mark" } },
+        "text": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "text" } }, "required": ["type"] },
+          "then": { "required": ["text"], "not": { "required": ["content"] } }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["formuleInline", "formuleBloc"] } }, "required": ["type"] },
+          "then": {
+            "required": ["attrs"],
+            "properties": {
+              "attrs": {
+                "type": "object",
+                "required": ["latex"],
+                "additionalProperties": false,
+                "properties": { "latex": { "type": "string", "minLength": 1, "maxLength": 2000 } }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "heading" } }, "required": ["type"] },
+          "then": {
+            "required": ["attrs"],
+            "properties": {
+              "attrs": {
+                "type": "object",
+                "required": ["level"],
+                "properties": { "level": { "type": "integer", "minimum": 3, "maximum": 4 } }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "figure" } }, "required": ["type"] },
+          "then": {
+            "required": ["attrs"],
+            "properties": {
+              "attrs": {
+                "type": "object",
+                "required": ["src", "alt"],
+                "additionalProperties": false,
+                "properties": {
+                    "src": { "type": "string", "pattern": "^contenus/[a-f0-9]{64}\\.(svg|png|jpg|webp)$" },
+                  "alt": { "type": "string", "minLength": 1, "maxLength": 300 },
+                  "legende": { "type": "string", "maxLength": 300 },
+                  "credit": { "type": "string", "maxLength": 300 },
+                  "largeur_pct": { "type": "integer", "minimum": 10, "maximum": 100 }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "graphique" } }, "required": ["type"] },
+          "then": {
+            "required": ["attrs"],
+            "properties": {
+              "attrs": {
+                "type": "object",
+                "required": ["graphique_type", "series"],
+                "additionalProperties": false,
+                "properties": {
+                  "graphique_type": { "enum": ["barres", "courbe", "histogramme", "secteurs", "nuage"] },
+                  "titre": { "type": "string", "maxLength": 200 },
+                  "axe_x": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "label": { "type": "string", "maxLength": 100 },
+                      "categories": { "type": "array", "items": { "type": "string", "maxLength": 100 } }
+                    }
+                  },
+                  "axe_y": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "label": { "type": "string", "maxLength": 100 },
+                      "min": { "type": "number" },
+                      "max": { "type": "number" }
+                    }
+                  },
+                  "series": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 6,
+                    "items": {
+                      "type": "object",
+                      "required": ["nom"],
+                      "additionalProperties": false,
+                      "anyOf": [{ "required": ["valeurs"] }, { "required": ["points"] }],
+                      "properties": {
+                        "nom": { "type": "string", "minLength": 1, "maxLength": 100 },
+                        "valeurs": { "type": "array", "items": { "type": "number" } },
+                        "points": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": ["x", "y"],
+                            "additionalProperties": false,
+                            "properties": { "x": { "type": "number" }, "y": { "type": "number" } }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "type": { "const": "zoneReponse" } }, "required": ["type"] },
+          "then": {
+            "properties": {
+              "attrs": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": { "lignes": { "type": "integer", "minimum": 1, "maximum": 30 } }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

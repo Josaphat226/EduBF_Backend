@@ -525,6 +525,7 @@ router.get('/documents', limiterDocuments, async (req, res, next) => {
     const { rows: countRows } = await db.query(`SELECT COUNT(*) as n FROM documents d ${whereClause}`, params)
     const total = parseInt(countRows[0].n)
     const totalPages = Math.ceil(total / limit)
+        if (q && parseInt(page) === 1 && !req.session.admin) require('../services/stats').enregistrerRecherche(q, total, 'documents')
 
     const { rows: documents } = await db.query(
       `SELECT ${COLONNES_DOCUMENT_D}, c.nom AS categorie_nom, e.nom AS examen_nom, td.nom AS type_precis_nom
