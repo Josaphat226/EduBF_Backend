@@ -14,6 +14,7 @@ const { valider, calculerEmpreinte } = require('../services/contenus/validation'
 const multer = require('multer')
 const supabase = require('../database/supabase')
 const { preparerMedia, ErreurMedia, BUCKET_MEDIAS } = require('../services/contenus/medias')
+const { supprimerPdf } = require('../services/contenus/pdf-stockage')
 
 const TYPES = ['exercice', 'serie_exercices', 'devoir', 'composition', 'sujet_examen']
 const DIFFICULTES = ['facile', 'moyen', 'difficile']
@@ -658,6 +659,7 @@ router.post('/:id/relire', async (req, res, next) => {
 
 router.post('/:id/publier', async (req, res, next) => {
   try {
+    let anciensPdf = [] // PDF de la version qui va être remplacée : à supprimer du stockage après la publication
     const resultat = await transaction(async (client) => {
       // Verrou : deux publications simultanées du même contenu sont impossibles
       const verrou = await client.query('SELECT id FROM pedagogie.contenus WHERE id = $1 FOR UPDATE', [req.params.id])
@@ -679,7 +681,13 @@ router.post('/:id/publier', async (req, res, next) => {
       const empreinte = calculerEmpreinte(version.contenu_json)
       const adminId = req.session.admin.id
 
-      await client.query("UPDATE pedagogie.versions SET statut = 'archivee' WHERE contenu_id = $1 AND statut = 'publiee'", [req.params.id])
+          const ancien = await client.query(
+        "SELECT pdf_sujet_url, pdf_corrige_url FROM pedagogie.versions WHERE contenu_id = $1 AND statut = 'publiee'", [req.params.id])
+      anciensPdf = ancien.rows.flatMap((r) => [r.pdf_sujet_url, r.pdf_corrige_url])
+      await client.query(
+        `UPDATE pedagogie.versions
+            SET statut = 'archivee', pdf_sujet_url = NULL, pdf_corrige_url = NULL, pdf_statut = 'aucun'
+          WHERE contenu_id = $1 AND statut = 'publiee'`, [req.params.id])
       await client.query(
         `UPDATE pedagogie.versions
             SET statut = 'publiee', empreinte = $2, publiee_par = $3, date_publication = now(),
@@ -699,6 +707,7 @@ router.post('/:id/publier', async (req, res, next) => {
       await logAction(client, req, 'publication', req.params.id, `Publication de la version ${version.numero} — « ${version.titre} »`)
       return { code: rows[0].code, numero: version.numero, avertissements: verification.avertissements }
     })
+       await supprimerPdf(anciensPdf)
     res.json({ statut: 'publiee', pdf_statut: 'aucun', ...resultat })
   } catch (err) { gererErreur(err, res, next) }
 })
@@ -712,6 +721,18 @@ router.patch('/:id/actif', async (req, res, next) => {
     if (req.body.actif && !rows[0].version_publiee_id) return fail(res, 409, 'Ce contenu n’a jamais été publié.')
 
     await db.query('UPDATE pedagogie.contenus SET actif = $2, date_modification = now() WHERE id = $1', [req.params.id, req.body.actif])
+        if (!req.body.actif && rows[0].version_publiee_id) {
+      // Dépublication : les PDF sont supprimés du stockage ; à la remise en ligne, l'outil les refabriquera
+      const pdf = await db.query(
+        `UPDATE pedagogie.versions v
+            SET pdf_sujet_url = NULL, pdf_corrige_url = NULL, pdf_statut = 'aucun', pdf_tentatives = 0, pdf_erreur = NULL
+           FROM pedagogie.versions o
+          WHERE v.id = o.id AND v.id = $1
+        RETURNING o.pdf_sujet_url AS ancien_sujet, o.pdf_corrige_url AS ancien_corrige`,
+        [rows[0].version_publiee_id]
+      )
+      await supprimerPdf(pdf.rows.flatMap((r) => [r.ancien_sujet, r.ancien_corrige]))
+    }
     await logAction(db, req, req.body.actif ? 'remise_en_ligne' : 'depublication', req.params.id, `« ${rows[0].titre} »`)
     res.json({ actif: req.body.actif })
   } catch (err) { gererErreur(err, res, next) }

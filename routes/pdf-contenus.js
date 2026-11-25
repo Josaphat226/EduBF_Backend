@@ -6,9 +6,7 @@ const express = require('express')
 const multer = require('multer')
 const router = express.Router()
 const db = require('../database/database')
-const supabase = require('../database/supabase')
-
-const BUCKET_PDF = 'contenus-pdf'
+const { envoyerPdf, supprimerPdf } = require('../services/contenus/pdf-stockage')
 const FORMAT_CODE = /^[ABCDEFGHJKMNPQRSTUVWXYZ2-9]{6}$/
 
 const recevoir = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 2 } })
@@ -35,14 +33,6 @@ router.param('numero', (req, res, next, n) => {
   if (!/^\d{1,6}$/.test(n)) return res.status(404).json({ error: 'Version introuvable.' })
   next()
 })
-
-let bucketPret = false
-async function assurerBucket() {
-  if (bucketPret) return
-  // Si le bucket existe déjà (créé à la main), l'erreur éventuelle est ignorée : l'envoi du fichier dira si tout va bien.
-  await supabase.storage.createBucket(BUCKET_PDF, { public: true }).catch(() => {})
-  bucketPret = true
-}
 
 router.get('/a-generer', async (req, res, next) => {
   try {
@@ -71,20 +61,21 @@ router.post('/:code/:numero', (req, res, next) => {
       }
 
       const { rows } = await db.query(
-        `SELECT v.id FROM pedagogie.versions v JOIN pedagogie.contenus c ON c.id = v.contenu_id
+        `SELECT v.id, v.pdf_sujet_url, v.pdf_corrige_url FROM pedagogie.versions v JOIN pedagogie.contenus c ON c.id = v.contenu_id
           WHERE c.code = $1 AND v.numero = $2 AND v.statut = 'publiee'`,
         [req.params.code, req.params.numero]
       )
       if (!rows[0]) return res.status(404).json({ error: 'Version publiée introuvable.' })
 
-      await assurerBucket()
       const base = `${req.params.code}-v${req.params.numero}-${Date.now()}`
       const urls = {}
-      for (const [nom, fichier] of [['sujet', sujet], ['corrige', corrige]]) {
-        const chemin = `${base}-${nom}.pdf`
-        const { error } = await supabase.storage.from(BUCKET_PDF).upload(chemin, fichier.buffer, { contentType: 'application/pdf', upsert: false })
-        if (error) throw new Error('Envoi vers le stockage : ' + error.message)
-        urls[nom] = supabase.storage.from(BUCKET_PDF).getPublicUrl(chemin).data.publicUrl
+      try {
+        for (const [nom, fichier] of [['sujet', sujet], ['corrige', corrige]]) {
+          urls[nom] = await envoyerPdf(`${base}-${nom}.pdf`, fichier.buffer, `EduBF-${req.params.code}-${nom}.pdf`)
+        }
+      } catch (e) {
+        await supprimerPdf(Object.values(urls)) // un seul des deux fichiers est parti : on ne le laisse pas traîner
+        throw e
       }
 
       await db.query(
@@ -93,6 +84,8 @@ router.post('/:code/:numero', (req, res, next) => {
           WHERE id = $1`,
         [rows[0].id, urls.sujet, urls.corrige]
       )
+      // Les anciens fichiers de cette version (cas d'une régénération) sont supprimés
+      await supprimerPdf([rows[0].pdf_sujet_url, rows[0].pdf_corrige_url])
       res.json({ ok: true })
     } catch (e) { next(e) }
   })
