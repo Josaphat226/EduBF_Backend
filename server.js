@@ -173,6 +173,7 @@ app.use('/api', (req, res, next) => {
 // ========== API JSON (frontend Next.js) ==========
 app.use('/api/contenus', require('./routes/contenus-public'))
 app.use('/api/stats', require('./routes/stats-public'))
+app.use('/api/pdf-contenus', require('./routes/pdf-contenus'))
 app.use('/api', require('./routes/api'))
 app.use('/api/admin/login', limiterConnexion)
 app.use('/api/admin/campagnes', require('./routes/admin-campagnes'))
