@@ -225,6 +225,37 @@ router.get('/:code', async (req, res, next) => {
   } catch (err) { next(err) }
 })
 
+
+
+
+
+
+// Téléchargement du PDF fabriqué à la publication : redirige vers le fichier avec un nom propre.
+router.get('/:code/pdf/:type', async (req, res, next) => {
+  try {
+    const type = req.params.type
+    if (type !== 'sujet' && type !== 'corrige') return fail(res, 404, 'PDF introuvable.')
+    const { rows } = await db.query(
+      `SELECT v.pdf_statut, v.pdf_sujet_url, v.pdf_corrige_url
+         FROM pedagogie.contenus c JOIN pedagogie.versions v ON v.id = c.version_publiee_id
+        WHERE c.code = $1 AND c.actif`,
+      [req.params.code]
+    )
+    const url = rows[0] && rows[0].pdf_statut === 'pret' ? (type === 'sujet' ? rows[0].pdf_sujet_url : rows[0].pdf_corrige_url) : null
+    if (!url) return fail(res, 404, 'Le PDF n\'est pas encore prêt.')
+    const nom = encodeURIComponent(`EduBF-${req.params.code}-${type}.pdf`)
+    res.redirect(302, url + (url.includes('?') ? '&' : '?') + 'download=' + nom)
+  } catch (err) { next(err) }
+})
+
+
+
+
+
+
+
+
+
 // ===================== SUIVI DES CONSULTATIONS =====================
 // Appelé par le navigateur : à l'arrivée sur la page (vue_sujet) et à la première
 // ouverture d'un corrigé (vue_corrige). Les téléchargements seront enregistrés par
