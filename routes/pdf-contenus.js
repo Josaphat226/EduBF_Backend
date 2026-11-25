@@ -39,8 +39,8 @@ router.param('numero', (req, res, next, n) => {
 let bucketPret = false
 async function assurerBucket() {
   if (bucketPret) return
-  const { error } = await supabase.storage.createBucket(BUCKET_PDF, { public: true })
-  if (error && !/already exists|duplicate/i.test(error.message || '')) throw new Error('Bucket PDF : ' + error.message)
+  // Si le bucket existe déjà (créé à la main), l'erreur éventuelle est ignorée : l'envoi du fichier dira si tout va bien.
+  await supabase.storage.createBucket(BUCKET_PDF, { public: true }).catch(() => {})
   bucketPret = true
 }
 

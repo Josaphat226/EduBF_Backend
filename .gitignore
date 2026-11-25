@@ -6,3 +6,22 @@ node_modules/
 
 .env.import
 import_*.csv
+
+
+
+
+# Dossiers PDF de réparation
+pdf-a-reparer/
+pdf-repares/
+
+# Fichiers de test
+body.json
+annonces/test.html
+manifeste.csv
+manifeste.json
+
+# Scripts temporaires
+dechiffrer.py
+exporter-proteges.js
+lister-pdf-proteges.js
+remplacer-proteges.js
