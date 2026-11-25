@@ -1,0 +1,991 @@
+{
+  "version_schema": 1,
+  "entete": {
+    "consignes": {
+      "type": "doc",
+      "content": [
+        {
+          "type": "paragraph",
+          "content": [
+            {
+              "type": "text",
+              "text": "Toute réponse doit être justifiée. Le soin de la présentation sera pris en compte."
+            }
+          ]
+        }
+      ]
+    },
+    "materiel": "Calculatrice autorisée",
+    "duree_minutes": 45,
+    "bareme_total": 10
+  },
+  "parties": [
+    {
+      "id": "part-0001",
+      "titre": "Activités numériques",
+      "exercices": [
+        {
+          "id": "exo-0001",
+          "titre": "Racines carrées",
+          "enonce": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "On considère le nombre "
+                  },
+                  {
+                    "type": "formuleInline",
+                    "attrs": {
+                      "latex": "A = \\sqrt{50} - \\sqrt{18} + \\sqrt{8}"
+                    }
+                  },
+                  {
+                    "type": "text",
+                    "text": "."
+                  }
+                ]
+              },
+              {
+                "type": "figure",
+                "attrs": {
+                  "src": "contenus/2d41bb7e7e9c56580b01e02179bcb51ebe1d36ffe4ce6d799e8b89ee13a3bc73.svg",
+                  "alt": "Circuit série : une source de tension et une résistance de 100 ohms",
+                  "legende": "Figure 1 — circuit série",
+                  "credit": "Schéma EduBF (essai)"
+                }
+              }
+            ]
+          },
+          "questions": [
+            {
+              "id": "qst-0001",
+              "enonce": {
+                "type": "doc",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "Écrire "
+                      },
+                      {
+                        "type": "formuleInline",
+                        "attrs": {
+                          "latex": "A"
+                        }
+                      },
+                      {
+                        "type": "text",
+                        "text": " sous la forme "
+                      },
+                      {
+                        "type": "formuleInline",
+                        "attrs": {
+                          "latex": "a\\sqrt{2}"
+                        }
+                      },
+                      {
+                        "type": "text",
+                        "text": ", où "
+                      },
+                      {
+                        "type": "formuleInline",
+                        "attrs": {
+                          "latex": "a"
+                        }
+                      },
+                      {
+                        "type": "text",
+                        "text": " est un entier."
+                      }
+                    ]
+                  },
+                  {
+                    "type": "zoneReponse",
+                    "attrs": {
+                      "lignes": 3
+                    }
+                  }
+                ]
+              },
+              "points": 2,
+              "corrige": {
+                "reponse_attendue": {
+                  "type": "doc",
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "formuleInline",
+                          "attrs": {
+                            "latex": "A = 4\\sqrt{2}"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "methode": {
+                  "type": "doc",
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "On décompose chaque radical en faisant apparaître le plus grand carré parfait, puis on regroupe les termes en "
+                        },
+                        {
+                          "type": "formuleInline",
+                          "attrs": {
+                            "latex": "\\sqrt{2}"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "etapes": [
+                  {
+                    "titre": "Décomposer chaque radical",
+                    "doc": {
+                      "type": "doc",
+                      "content": [
+                        {
+                          "type": "formuleBloc",
+                          "attrs": {
+                            "latex": "\\sqrt{50} = \\sqrt{25 \\times 2} = 5\\sqrt{2}"
+                          }
+                        },
+                        {
+                          "type": "formuleBloc",
+                          "attrs": {
+                            "latex": "\\sqrt{18} = \\sqrt{9 \\times 2} = 3\\sqrt{2}"
+                          }
+                        },
+                        {
+                          "type": "formuleBloc",
+                          "attrs": {
+                            "latex": "\\sqrt{8} = \\sqrt{4 \\times 2} = 2\\sqrt{2}"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "titre": "Regrouper",
+                    "doc": {
+                      "type": "doc",
+                      "content": [
+                        {
+                          "type": "formuleBloc",
+                          "attrs": {
+                            "latex": "A = 5\\sqrt{2} - 3\\sqrt{2} + 2\\sqrt{2} = (5 - 3 + 2)\\sqrt{2} = 4\\sqrt{2}"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "bareme": [
+                  {
+                    "critere": "Décomposition correcte des trois radicaux",
+                    "points": 1.5
+                  },
+                  {
+                    "critere": "Regroupement et résultat",
+                    "points": 0.5
+                  }
+                ]
+              }
+            },
+            {
+              "id": "qst-0002",
+              "enonce": {
+                "type": "doc",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "On donne "
+                      },
+                      {
+                        "type": "formuleInline",
+                        "attrs": {
+                          "latex": "B = (\\sqrt{5} + 1)(\\sqrt{5} - 1)"
+                        }
+                      },
+                      {
+                        "type": "text",
+                        "text": " et "
+                      },
+                      {
+                        "type": "formuleInline",
+                        "attrs": {
+                          "latex": "C = (2\\sqrt{3})^2"
+                        }
+                      },
+                      {
+                        "type": "text",
+                        "text": "."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "sous_questions": [
+                {
+                  "id": "qst-0002a",
+                  "enonce": {
+                    "type": "doc",
+                    "content": [
+                      {
+                        "type": "paragraph",
+                        "content": [
+                          {
+                            "type": "text",
+                            "text": "Calculer "
+                          },
+                          {
+                            "type": "formuleInline",
+                            "attrs": {
+                              "latex": "B"
+                            }
+                          },
+                          {
+                            "type": "text",
+                            "text": "."
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "points": 1.5,
+                  "corrige": {
+                    "reponse_attendue": {
+                      "type": "doc",
+                      "content": [
+                        {
+                          "type": "paragraph",
+                          "content": [
+                            {
+                              "type": "formuleInline",
+                              "attrs": {
+                                "latex": "B = 4"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    "etapes": [
+                      {
+                        "doc": {
+                          "type": "doc",
+                          "content": [
+                            {
+                              "type": "paragraph",
+                              "content": [
+                                {
+                                  "type": "text",
+                                  "text": "On reconnaît l’identité remarquable "
+                                },
+                                {
+                                  "type": "formuleInline",
+                                  "attrs": {
+                                    "latex": "(a+b)(a-b) = a^2 - b^2"
+                                  }
+                                },
+                                {
+                                  "type": "text",
+                                  "text": " :"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "formuleBloc",
+                              "attrs": {
+                                "latex": "B = (\\sqrt{5})^2 - 1^2 = 5 - 1 = 4"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "qst-0002b",
+                  "enonce": {
+                    "type": "doc",
+                    "content": [
+                      {
+                        "type": "paragraph",
+                        "content": [
+                          {
+                            "type": "text",
+                            "text": "Calculer "
+                          },
+                          {
+                            "type": "formuleInline",
+                            "attrs": {
+                              "latex": "C"
+                            }
+                          },
+                          {
+                            "type": "text",
+                            "text": "."
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "points": 1,
+                  "verification": {
+                    "mode": "numerique",
+                    "valeur": 12
+                  },
+                  "corrige": {
+                    "reponse_attendue": {
+                      "type": "doc",
+                      "content": [
+                        {
+                          "type": "paragraph",
+                          "content": [
+                            {
+                              "type": "formuleInline",
+                              "attrs": {
+                                "latex": "C = 12"
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    "etapes": [
+                      {
+                        "doc": {
+                          "type": "doc",
+                          "content": [
+                            {
+                              "type": "formuleBloc",
+                              "attrs": {
+                                "latex": "C = 2^2 \\times (\\sqrt{3})^2 = 4 \\times 3 = 12"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "qst-0003",
+              "enonce": {
+                "type": "doc",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "Donner la valeur approchée de "
+                      },
+                      {
+                        "type": "formuleInline",
+                        "attrs": {
+                          "latex": "A"
+                        }
+                      },
+                      {
+                        "type": "text",
+                        "text": " à "
+                      },
+                      {
+                        "type": "formuleInline",
+                        "attrs": {
+                          "latex": "0{,}1"
+                        }
+                      },
+                      {
+                        "type": "text",
+                        "text": " près."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "points": 1,
+              "verification": {
+                "mode": "numerique",
+                "valeur": 5.7,
+                "tolerance": 0.05
+              },
+              "corrige": {
+                "reponse_attendue": {
+                  "type": "doc",
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "formuleInline",
+                          "attrs": {
+                            "latex": "A \\approx 5{,}7"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "etapes": [
+                  {
+                    "doc": {
+                      "type": "doc",
+                      "content": [
+                        {
+                          "type": "paragraph",
+                          "content": [
+                            {
+                              "type": "text",
+                              "text": "D’après la question 1, "
+                            },
+                            {
+                              "type": "formuleInline",
+                              "attrs": {
+                                "latex": "A = 4\\sqrt{2} \\approx 4 \\times 1{,}414 \\approx 5{,}657"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": ", soit "
+                            },
+                            {
+                              "type": "formuleInline",
+                              "attrs": {
+                                "latex": "5{,}7"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": " à "
+                            },
+                            {
+                              "type": "formuleInline",
+                              "attrs": {
+                                "latex": "0{,}1"
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "text": " près."
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "exo-0002",
+          "titre": "Statistiques",
+          "annexes": [
+            {
+              "id": "ann-0001",
+              "titre": "Notes de cinq élèves",
+              "doc": {
+                "type": "doc",
+                "content": [
+                  {
+                    "type": "table",
+                    "content": [
+                      {
+                        "type": "tableRow",
+                        "content": [
+                          {
+                            "type": "tableHeader",
+                            "content": [
+                              {
+                                "type": "paragraph",
+                                "content": [
+                                  {
+                                    "type": "text",
+                                    "text": "Élève"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "type": "tableHeader",
+                            "content": [
+                              {
+                                "type": "paragraph",
+                                "content": [
+                                  {
+                                    "type": "text",
+                                    "text": "Note sur 20"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "tableRow",
+                        "content": [
+                          {
+                            "type": "tableCell",
+                            "content": [
+                              {
+                                "type": "paragraph",
+                                "content": [
+                                  {
+                                    "type": "text",
+                                    "text": "Awa"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "type": "tableCell",
+                            "content": [
+                              {
+                                "type": "paragraph",
+                                "content": [
+                                  {
+                                    "type": "text",
+                                    "text": "8"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "tableRow",
+                        "content": [
+                          {
+                            "type": "tableCell",
+                            "content": [
+                              {
+                                "type": "paragraph",
+                                "content": [
+                                  {
+                                    "type": "text",
+                                    "text": "Issa"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "type": "tableCell",
+                            "content": [
+                              {
+                                "type": "paragraph",
+                                "content": [
+                                  {
+                                    "type": "text",
+                                    "text": "12"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "tableRow",
+                        "content": [
+                          {
+                            "type": "tableCell",
+                            "content": [
+                              {
+                                "type": "paragraph",
+                                "content": [
+                                  {
+                                    "type": "text",
+                                    "text": "Mariam"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "type": "tableCell",
+                            "content": [
+                              {
+                                "type": "paragraph",
+                                "content": [
+                                  {
+                                    "type": "text",
+                                    "text": "10"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "tableRow",
+                        "content": [
+                          {
+                            "type": "tableCell",
+                            "content": [
+                              {
+                                "type": "paragraph",
+                                "content": [
+                                  {
+                                    "type": "text",
+                                    "text": "Souleymane"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "type": "tableCell",
+                            "content": [
+                              {
+                                "type": "paragraph",
+                                "content": [
+                                  {
+                                    "type": "text",
+                                    "text": "14"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      },
+                      {
+                        "type": "tableRow",
+                        "content": [
+                          {
+                            "type": "tableCell",
+                            "content": [
+                              {
+                                "type": "paragraph",
+                                "content": [
+                                  {
+                                    "type": "text",
+                                    "text": "Fatou"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "type": "tableCell",
+                            "content": [
+                              {
+                                "type": "paragraph",
+                                "content": [
+                                  {
+                                    "type": "text",
+                                    "text": "11"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          ],
+          "enonce": {
+            "type": "doc",
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "Le tableau et le diagramme ci-dessous présentent les notes obtenues par cinq élèves à un devoir de mathématiques."
+                  }
+                ]
+              },
+              {
+                "type": "graphique",
+                "attrs": {
+                  "graphique_type": "barres",
+                  "titre": "Notes obtenues",
+                  "axe_x": {
+                    "label": "Élèves",
+                    "categories": [
+                      "Awa",
+                      "Issa",
+                      "Mariam",
+                      "Souleymane",
+                      "Fatou"
+                    ]
+                  },
+                  "axe_y": {
+                    "label": "Note sur 20",
+                    "min": 0,
+                    "max": 20
+                  },
+                  "series": [
+                    {
+                      "nom": "Note",
+                      "valeurs": [
+                        8,
+                        12,
+                        10,
+                        14,
+                        11
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "questions": [
+            {
+              "id": "qst-0004",
+              "enonce": {
+                "type": "doc",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "Calculer la moyenne de ces notes."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "points": 1.5,
+              "verification": {
+                "mode": "numerique",
+                "valeur": 11
+              },
+              "corrige": {
+                "reponse_attendue": {
+                  "type": "doc",
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "La moyenne est égale à "
+                        },
+                        {
+                          "type": "formuleInline",
+                          "attrs": {
+                            "latex": "11"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "etapes": [
+                  {
+                    "doc": {
+                      "type": "doc",
+                      "content": [
+                        {
+                          "type": "formuleBloc",
+                          "attrs": {
+                            "latex": "\\frac{8 + 12 + 10 + 14 + 11}{5} = \\frac{55}{5} = 11"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "bareme": [
+                  {
+                    "critere": "Somme correcte des notes",
+                    "points": 0.5
+                  },
+                  {
+                    "critere": "Division par l’effectif et résultat",
+                    "points": 1
+                  }
+                ]
+              }
+            },
+            {
+              "id": "qst-0005",
+              "enonce": {
+                "type": "doc",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "Déterminer la médiane de cette série de notes."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "points": 1.5,
+              "verification": {
+                "mode": "numerique",
+                "valeur": 11
+              },
+              "corrige": {
+                "reponse_attendue": {
+                  "type": "doc",
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "La médiane est "
+                        },
+                        {
+                          "type": "formuleInline",
+                          "attrs": {
+                            "latex": "11"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "methode": {
+                  "type": "doc",
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "On range les notes dans l’ordre croissant ; l’effectif étant impair, la médiane est la valeur centrale."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "etapes": [
+                  {
+                    "doc": {
+                      "type": "doc",
+                      "content": [
+                        {
+                          "type": "formuleBloc",
+                          "attrs": {
+                            "latex": "8 \\;;\\; 10 \\;;\\; \\mathbf{11} \\;;\\; 12 \\;;\\; 14"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "qst-0006",
+              "enonce": {
+                "type": "doc",
+                "content": [
+                  {
+                    "type": "paragraph",
+                    "content": [
+                      {
+                        "type": "text",
+                        "text": "Calculer l’étendue de cette série."
+                      }
+                    ]
+                  }
+                ]
+              },
+              "points": 1.5,
+              "verification": {
+                "mode": "numerique",
+                "valeur": 6
+              },
+              "corrige": {
+                "reponse_attendue": {
+                  "type": "doc",
+                  "content": [
+                    {
+                      "type": "paragraph",
+                      "content": [
+                        {
+                          "type": "text",
+                          "text": "L’étendue est "
+                        },
+                        {
+                          "type": "formuleInline",
+                          "attrs": {
+                            "latex": "6"
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "text": "."
+                        }
+                      ]
+                    }
+                  ]
+                },
+                "etapes": [
+                  {
+                    "doc": {
+                      "type": "doc",
+                      "content": [
+                        {
+                          "type": "formuleBloc",
+                          "attrs": {
+                            "latex": "14 - 8 = 6"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
